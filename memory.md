@@ -17,3 +17,5 @@ Replaced the FastAPI app (`server.py`, `requirements.txt`). HTTP tests remain in
 - Phone OTP: Firebase project `theshutki-a580d` (`theshutki-a580d.firebaseapp.com`). Keys live in `backend/.env` and are sent to the browser by `GET /api/auth/config`. Enable the Phone provider in Firebase Authentication and add the site under Authorized domains. On hPanel set `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, and `FIREBASE_PROJECT_ID` from that file.
 
 `node-backend/` and `export_node/backend/` are the older API-only copies. The live app calls `/api` on the same host unless `REACT_APP_BACKEND_URL` is set.
+
+- Parent repo: `hedaapps-svg/TheShutki-`. `.github/workflows/sync-parent.yml` merges `upstream/main` into this fork every 6 hours and on manual run. A conflict stops the job and leaves `main` unchanged.
