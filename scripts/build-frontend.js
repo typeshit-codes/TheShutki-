@@ -18,5 +18,5 @@ function run(args) {
   if (result.status !== 0) process.exit(result.status == null ? 1 : result.status);
 }
 
-run(["install", "--include=dev"]);
+run(["install", "--include=dev", "--legacy-peer-deps"]);
 run(["run", "build"]);

@@ -6,7 +6,7 @@ The live API is the Node.js/Express backend in `backend/`, taken from `2ad762d9-
 Replaced the FastAPI app (`server.py`, `requirements.txt`). HTTP tests remain in `backend/tests/`.
 
 - Start locally: `npm start` from the repo root, or `cd backend && npm start` (port 8001 if `PORT` is unset)
-- hPanel Node.js Web App (one app): framework **Express**, Node **24** or **22**, root `/`, entry **`server.js`**, build **Default for Express**. `npm install` builds the React shop. The site is served at `/` and the API at `/api`. Do not set `PORT`. Set `MONGO_URL` and allow `0.0.0.0/0` in Atlas.
+- hPanel Node.js Web App (one app): framework **Express**, Node **24** or **22**, root `/`, entry **`server.js`**, build **Default for Express**. `npm install` builds the React shop (`frontend/.npmrc` uses legacy peer deps; hoisted `ajv` is 8.17.1). The site is served at `/` and the API at `/api`. Do not set `PORT`. Set `MONGO_URL` and allow `0.0.0.0/0` in Atlas.
 - Mongo: `MONGO_URL` (default `mongodb://localhost:27017`), `DB_NAME` (default `theshutki`). The HTTP server listens before Mongo connects and retries.
 - Empty DB auto-seeds admin, catalog, recipes, reviews, settings
 - Uploads: `backend/uploads/`, served at `/api/files/<filename>`
