@@ -623,7 +623,7 @@ async function connectMongo() {
   let attempt = 0;
   for (;;) {
     attempt += 1;
-    const client = new MongoClient(MONGO_URL, { serverSelectionTimeoutMS: 8000 });
+    const client = new MongoClient(MONGO_URL, { serverSelectionTimeoutMS: 8000, family: 4 });
     try {
       await client.connect();
       const database = client.db(DB_NAME);
