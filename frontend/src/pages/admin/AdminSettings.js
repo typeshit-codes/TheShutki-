@@ -88,6 +88,14 @@ export default function AdminSettings() {
           ))}
           <button onClick={() => setS({ ...s, social_images: [...(s.social_images || []), ""] })} className="text-sunset text-sm font-semibold">+ Add image slot</button>
         </Card>
+
+        <Card title="Login / Authentication">
+          <p className="text-xs text-charcoal/50">Paste keys here to enable social & OTP login. Google button and Phone-OTP box appear on the login page automatically once filled. Leave blank to keep them hidden. These values (Google Client ID, Firebase API key) are public client keys — safe to store here.</p>
+          <Field label="Google OAuth Client ID" k="google_client_id" />
+          <Field label="Firebase API Key" k="firebase_api_key" />
+          <Field label="Firebase Auth Domain" k="firebase_auth_domain" />
+          <Field label="Firebase Project ID" k="firebase_project_id" />
+        </Card>
       </div>
     </div>
   );

@@ -299,6 +299,10 @@ class SettingsIn(BaseModel):
     announcement: Optional[str] = None
     payment_methods: Optional[dict] = None
     social_images: Optional[List[str]] = None
+    google_client_id: Optional[str] = None
+    firebase_api_key: Optional[str] = None
+    firebase_auth_domain: Optional[str] = None
+    firebase_project_id: Optional[str] = None
 
 
 # ------------------------------------------------------------------ helpers
@@ -354,16 +358,28 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "").strip()
 
 
+async def resolve_auth_cfg():
+    """Merge admin-panel settings (priority) with backend env fallback."""
+    s = await db.settings.find_one({"key": "main"}) or {}
+    return {
+        "google_client_id": (s.get("google_client_id") or GOOGLE_CLIENT_ID or "").strip(),
+        "firebase_api_key": (s.get("firebase_api_key") or os.environ.get("FIREBASE_API_KEY", "") or "").strip(),
+        "firebase_auth_domain": (s.get("firebase_auth_domain") or os.environ.get("FIREBASE_AUTH_DOMAIN", "") or "").strip(),
+        "firebase_project_id": (s.get("firebase_project_id") or FIREBASE_PROJECT_ID or "").strip(),
+    }
+
+
 @api.get("/auth/config")
 async def auth_config():
+    c = await resolve_auth_cfg()
     return {
-        "google_enabled": bool(GOOGLE_CLIENT_ID),
-        "google_client_id": GOOGLE_CLIENT_ID,
-        "firebase_enabled": bool(FIREBASE_PROJECT_ID and os.environ.get("FIREBASE_API_KEY", "").strip()),
+        "google_enabled": bool(c["google_client_id"]),
+        "google_client_id": c["google_client_id"],
+        "firebase_enabled": bool(c["firebase_project_id"] and c["firebase_api_key"]),
         "firebase": {
-            "apiKey": os.environ.get("FIREBASE_API_KEY", ""),
-            "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
-            "projectId": FIREBASE_PROJECT_ID,
+            "apiKey": c["firebase_api_key"],
+            "authDomain": c["firebase_auth_domain"],
+            "projectId": c["firebase_project_id"],
         },
     }
 
@@ -392,13 +408,15 @@ async def _issue_for_user(email: str, name: str, response: Response, phone: str 
 
 @api.post("/auth/google")
 async def auth_google(body: dict, response: Response):
-    if not GOOGLE_CLIENT_ID:
+    cfg = await resolve_auth_cfg()
+    client_id = cfg["google_client_id"]
+    if not client_id:
         raise HTTPException(status_code=400, detail="Google sign-in is not configured")
     credential = body.get("credential")
     try:
         from google.oauth2 import id_token as google_id_token
         from google.auth.transport import requests as google_requests
-        info = google_id_token.verify_oauth2_token(credential, google_requests.Request(), GOOGLE_CLIENT_ID)
+        info = google_id_token.verify_oauth2_token(credential, google_requests.Request(), client_id)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid Google credential")
     return await _issue_for_user(info.get("email"), info.get("name", ""), response, provider="google")
@@ -406,13 +424,15 @@ async def auth_google(body: dict, response: Response):
 
 @api.post("/auth/firebase")
 async def auth_firebase(body: dict, response: Response):
-    if not FIREBASE_PROJECT_ID:
+    cfg = await resolve_auth_cfg()
+    project_id = cfg["firebase_project_id"]
+    if not project_id:
         raise HTTPException(status_code=400, detail="Phone OTP login is not configured")
     id_tok = body.get("id_token")
     try:
         from google.oauth2 import id_token as google_id_token
         from google.auth.transport import requests as google_requests
-        info = google_id_token.verify_firebase_token(id_tok, google_requests.Request(), FIREBASE_PROJECT_ID)
+        info = google_id_token.verify_firebase_token(id_tok, google_requests.Request(), project_id)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid OTP token")
     phone = info.get("phone_number", "")
