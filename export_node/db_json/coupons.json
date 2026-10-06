@@ -1,0 +1,1 @@
+[{"_id":{"$oid":"6ac4a3ada0493d10c327bc16"},"code":"FIRST10","type":"percent","value":10,"min_order":0,"max_discount":300,"expiry":null,"usage_limit":null,"used":5,"active":true}]

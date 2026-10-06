@@ -1,0 +1,484 @@
+require("dotenv").config();
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
+const express = require("express");
+const cors = require("cors");
+const cookieParser = require("cookie-parser");
+const multer = require("multer");
+const QRCode = require("qrcode");
+const jwt = require("jsonwebtoken");
+const { MongoClient, ObjectId } = require("mongodb");
+const { slugify, nowIso, hashPassword, verifyPassword, signToken, clean, JWT_SECRET } = require("./util");
+const { seed } = require("./seed");
+
+const PORT = process.env.PORT || 8001;
+const MONGO_URL = process.env.MONGO_URL || "mongodb://localhost:27017";
+const DB_NAME = process.env.DB_NAME || "theshutki";
+
+const client = new MongoClient(MONGO_URL);
+let db;
+
+const app = express();
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ limit: "15mb" }));
+app.use(cookieParser());
+
+// ---------- uploads (local disk on your own server, served from /api/files) ----------
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+
+function persistUpload(file) {
+  const ext = (file.originalname.split(".").pop() || "bin").toLowerCase();
+  const filename = `${crypto.randomUUID()}.${ext}`;
+  fs.writeFileSync(path.join(UPLOAD_DIR, filename), file.buffer);
+  return filename;
+}
+
+const api = express.Router();
+
+// ---------- auth helpers ----------
+async function getTokenUser(req) {
+  let token = req.cookies?.access_token;
+  if (!token) {
+    const h = req.headers.authorization || "";
+    if (h.startsWith("Bearer ")) token = h.slice(7);
+  }
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    const user = await db.collection("users").findOne({ _id: new ObjectId(payload.sub) });
+    if (!user) return null;
+    return clean(user);
+  } catch {
+    return null;
+  }
+}
+function requireUser(handler) {
+  return async (req, res) => {
+    const user = await getTokenUser(req);
+    if (!user) return res.status(401).json({ detail: "Not authenticated" });
+    req.user = user;
+    return handler(req, res);
+  };
+}
+function requireAdmin(handler) {
+  return async (req, res) => {
+    const user = await getTokenUser(req);
+    if (!user) return res.status(401).json({ detail: "Not authenticated" });
+    if (user.role !== "admin") return res.status(403).json({ detail: "Admin access required" });
+    req.user = user;
+    return handler(req, res);
+  };
+}
+function setAuthCookie(res, token) {
+  res.cookie("access_token", token, { httpOnly: true, secure: true, sameSite: "none", maxAge: 604800000, path: "/" });
+}
+
+// ---------- JWT (Google/Firebase) verification via Google certs ----------
+async function verifyWithCerts(token, certsUrl, { audience, issuers }) {
+  const [headerB64] = token.split(".");
+  const header = JSON.parse(Buffer.from(headerB64, "base64").toString());
+  const resp = await fetch(certsUrl);
+  const certs = await resp.json();
+  const pem = certs[header.kid];
+  if (!pem) throw new Error("No matching cert");
+  return jwt.verify(token, pem, { algorithms: ["RS256"], audience, issuer: issuers });
+}
+
+async function resolveAuthCfg() {
+  const s = (await db.collection("settings").findOne({ key: "main" })) || {};
+  return {
+    google_client_id: (s.google_client_id || process.env.GOOGLE_CLIENT_ID || "").trim(),
+    firebase_api_key: (s.firebase_api_key || process.env.FIREBASE_API_KEY || "").trim(),
+    firebase_auth_domain: (s.firebase_auth_domain || process.env.FIREBASE_AUTH_DOMAIN || "").trim(),
+    firebase_project_id: (s.firebase_project_id || process.env.FIREBASE_PROJECT_ID || "").trim(),
+  };
+}
+
+async function issueForUser(res, { email, name, phone = "", provider = "" }) {
+  email = (email || "").toLowerCase();
+  let user = email ? await db.collection("users").findOne({ email }) : null;
+  if (!user && phone) user = await db.collection("users").findOne({ phone });
+  let uid, role, uname;
+  if (!user) {
+    const doc = { name: name || (email ? email.split("@")[0] : "Customer"), email: email || `${phone}@phone.theshutki`, phone, password_hash: hashPassword(crypto.randomUUID()), role: "customer", provider, created_at: nowIso() };
+    const r = await db.collection("users").insertOne(doc);
+    uid = String(r.insertedId); role = "customer"; uname = doc.name;
+  } else {
+    uid = String(user._id); role = user.role || "customer"; uname = user.name || name;
+  }
+  const token = signToken(uid, email, role);
+  setAuthCookie(res, token);
+  return { id: uid, name: uname, email, role, token };
+}
+
+// ================= AUTH =================
+api.post("/auth/register", async (req, res) => {
+  const { name, email, password, phone } = req.body;
+  const em = (email || "").toLowerCase();
+  if (await db.collection("users").findOne({ email: em })) return res.status(400).json({ detail: "Email already registered" });
+  const doc = { name, email: em, phone: phone || "", password_hash: hashPassword(password), role: "customer", created_at: nowIso() };
+  const r = await db.collection("users").insertOne(doc);
+  const uid = String(r.insertedId);
+  const token = signToken(uid, em, "customer");
+  setAuthCookie(res, token);
+  res.json({ id: uid, name, email: em, role: "customer", token });
+});
+
+api.post("/auth/login", async (req, res) => {
+  const em = (req.body.email || "").toLowerCase();
+  const user = await db.collection("users").findOne({ email: em });
+  if (!user || !verifyPassword(req.body.password, user.password_hash)) return res.status(401).json({ detail: "Invalid email or password" });
+  const uid = String(user._id);
+  const token = signToken(uid, em, user.role || "customer");
+  setAuthCookie(res, token);
+  res.json({ id: uid, name: user.name, email: em, role: user.role || "customer", token });
+});
+
+api.post("/auth/logout", (req, res) => { res.clearCookie("access_token", { path: "/" }); res.json({ ok: true }); });
+
+api.get("/auth/config", async (req, res) => {
+  const c = await resolveAuthCfg();
+  res.json({
+    google_enabled: !!c.google_client_id, google_client_id: c.google_client_id,
+    firebase_enabled: !!(c.firebase_project_id && c.firebase_api_key),
+    firebase: { apiKey: c.firebase_api_key, authDomain: c.firebase_auth_domain, projectId: c.firebase_project_id },
+  });
+});
+
+api.post("/auth/google", async (req, res) => {
+  const cfg = await resolveAuthCfg();
+  if (!cfg.google_client_id) return res.status(400).json({ detail: "Google sign-in is not configured" });
+  try {
+    const info = await verifyWithCerts(req.body.credential, "https://www.googleapis.com/oauth2/v1/certs", { audience: cfg.google_client_id, issuers: ["accounts.google.com", "https://accounts.google.com"] });
+    res.json(await issueForUser(res, { email: info.email, name: info.name, provider: "google" }));
+  } catch { res.status(401).json({ detail: "Invalid Google credential" }); }
+});
+
+api.post("/auth/firebase", async (req, res) => {
+  const cfg = await resolveAuthCfg();
+  if (!cfg.firebase_project_id) return res.status(400).json({ detail: "Phone OTP login is not configured" });
+  try {
+    const info = await verifyWithCerts(req.body.id_token, "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com", { audience: cfg.firebase_project_id, issuers: `https://securetoken.google.com/${cfg.firebase_project_id}` });
+    res.json(await issueForUser(res, { email: info.email || "", name: info.name || "", phone: info.phone_number || "", provider: "phone" }));
+  } catch { res.status(401).json({ detail: "Invalid OTP token" }); }
+});
+
+api.get("/auth/me", requireUser(async (req, res) => {
+  const u = req.user;
+  res.json({ id: u.id, name: u.name, email: u.email, role: u.role || "customer", phone: u.phone || "" });
+}));
+
+// ================= PRODUCTS =================
+api.get("/products", async (req, res) => {
+  const q = req.query;
+  const query = {};
+  if (q.category && q.category !== "all") query.category = q.category;
+  if (q.fish_type && q.fish_type !== "All") query.fish_type = q.fish_type;
+  if (q.salt_level && q.salt_level !== "All") query.salt_level = q.salt_level;
+  if (q.featured !== undefined) query.is_featured = q.featured === "true";
+  if (q.bestseller !== undefined) query.is_bestseller = q.bestseller === "true";
+  if (q.is_combo !== undefined) query.is_combo = q.is_combo === "true";
+  if (q.tag) query.tags = q.tag;
+  if (q.q) {
+    const rx = { $regex: q.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+    query.$or = [{ name: rx }, { bengali_name: rx }, { fish_type: rx }, { category: rx }, { tags: rx }, { description: rx }];
+  }
+  let docs = (await db.collection("products").find(query).toArray()).map(clean);
+  const minprice = (p) => Math.min(...((p.variants || []).map((v) => v.price).concat([Infinity])));
+  if (q.min_price) docs = docs.filter((d) => minprice(d) >= Number(q.min_price));
+  if (q.max_price) docs = docs.filter((d) => minprice(d) <= Number(q.max_price));
+  if (q.availability === "in_stock") docs = docs.filter((d) => (d.variants || []).some((v) => (v.stock || 0) > 0));
+  const sort = q.sort || "featured";
+  if (sort === "price_asc") docs.sort((a, b) => minprice(a) - minprice(b));
+  else if (sort === "price_desc") docs.sort((a, b) => minprice(b) - minprice(a));
+  else if (sort === "bestselling") docs.sort((a, b) => (b.reviews_count || 0) - (a.reviews_count || 0));
+  else if (sort === "new") docs.sort((a, b) => (b.is_new ? 1 : 0) - (a.is_new ? 1 : 0));
+  else docs.sort((a, b) => (a.is_featured === b.is_featured ? (b.rating || 0) - (a.rating || 0) : a.is_featured ? -1 : 1));
+  const skip = Number(q.skip || 0), limit = Number(q.limit || 100);
+  res.json(docs.slice(skip, skip + limit));
+});
+
+api.get("/products/suggestions", async (req, res) => {
+  const rx = { $regex: (req.query.q || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+  const docs = await db.collection("products").find({ $or: [{ name: rx }, { bengali_name: rx }, { fish_type: rx }, { tags: rx }] }).limit(6).toArray();
+  res.json(docs.map((d) => ({ id: String(d._id), name: d.name, slug: d.slug, image: (d.images || [])[0] })));
+});
+
+api.get("/products/:slug", async (req, res) => {
+  let doc = await db.collection("products").findOne({ slug: req.params.slug });
+  if (!doc) { try { doc = await db.collection("products").findOne({ _id: new ObjectId(req.params.slug) }); } catch {} }
+  if (!doc) return res.status(404).json({ detail: "Product not found" });
+  res.json(clean(doc));
+});
+
+api.post("/products", requireAdmin(async (req, res) => {
+  const doc = { ...req.body };
+  doc.slug = doc.slug || slugify(doc.name);
+  if (await db.collection("products").findOne({ slug: doc.slug })) doc.slug = `${doc.slug}-${crypto.randomBytes(3).toString("hex")}`;
+  doc.created_at = nowIso();
+  const r = await db.collection("products").insertOne(doc);
+  res.json(clean(await db.collection("products").findOne({ _id: r.insertedId })));
+}));
+
+api.put("/products/:id", requireAdmin(async (req, res) => {
+  const doc = { ...req.body }; delete doc.id; delete doc._id;
+  doc.slug = doc.slug || slugify(doc.name);
+  await db.collection("products").updateOne({ _id: new ObjectId(req.params.id) }, { $set: doc });
+  res.json(clean(await db.collection("products").findOne({ _id: new ObjectId(req.params.id) })));
+}));
+
+api.delete("/products/:id", requireAdmin(async (req, res) => {
+  await db.collection("products").deleteOne({ _id: new ObjectId(req.params.id) });
+  res.json({ ok: true });
+}));
+
+// ================= CATEGORIES =================
+api.get("/categories", async (req, res) => {
+  const docs = await db.collection("categories").find().sort({ order: 1 }).toArray();
+  res.json(docs.map(clean));
+});
+api.post("/categories", requireAdmin(async (req, res) => {
+  const doc = { ...req.body }; doc.slug = doc.slug || slugify(doc.name);
+  const r = await db.collection("categories").insertOne(doc);
+  res.json(clean(await db.collection("categories").findOne({ _id: r.insertedId })));
+}));
+api.put("/categories/:id", requireAdmin(async (req, res) => {
+  const doc = { ...req.body }; delete doc.id; delete doc._id; doc.slug = doc.slug || slugify(doc.name);
+  await db.collection("categories").updateOne({ _id: new ObjectId(req.params.id) }, { $set: doc });
+  res.json(clean(await db.collection("categories").findOne({ _id: new ObjectId(req.params.id) })));
+}));
+api.delete("/categories/:id", requireAdmin(async (req, res) => { await db.collection("categories").deleteOne({ _id: new ObjectId(req.params.id) }); res.json({ ok: true }); }));
+
+// ================= COUPONS =================
+async function validateCouponLogic(code, subtotal) {
+  const c = await db.collection("coupons").findOne({ code: (code || "").toUpperCase(), active: true });
+  if (!c) return { error: [404, "Invalid coupon code"] };
+  if (c.expiry) { const ex = new Date(c.expiry); if (!isNaN(ex) && ex < new Date()) return { error: [400, "Coupon expired"] }; }
+  if (c.usage_limit && (c.used || 0) >= c.usage_limit) return { error: [400, "Coupon usage limit reached"] };
+  if (subtotal < (c.min_order || 0)) return { error: [400, `Minimum order ₹${Math.round(c.min_order)} required`] };
+  let discount = c.type === "percent" ? (subtotal * c.value) / 100 : c.value;
+  if (c.type === "percent" && c.max_discount) discount = Math.min(discount, c.max_discount);
+  discount = Math.round(Math.min(discount, subtotal) * 100) / 100;
+  return { data: { code: c.code, discount, type: c.type, value: c.value } };
+}
+api.post("/coupons/validate", async (req, res) => {
+  const r = await validateCouponLogic(req.body.code, req.body.subtotal);
+  if (r.error) return res.status(r.error[0]).json({ detail: r.error[1] });
+  res.json(r.data);
+});
+api.get("/coupons", requireAdmin(async (req, res) => res.json((await db.collection("coupons").find().toArray()).map(clean))));
+api.post("/coupons", requireAdmin(async (req, res) => {
+  const doc = { ...req.body }; doc.code = (doc.code || "").toUpperCase();
+  if (await db.collection("coupons").findOne({ code: doc.code })) return res.status(400).json({ detail: "Coupon code exists" });
+  if (doc.used === undefined) doc.used = 0;
+  const r = await db.collection("coupons").insertOne(doc);
+  res.json(clean(await db.collection("coupons").findOne({ _id: r.insertedId })));
+}));
+api.put("/coupons/:id", requireAdmin(async (req, res) => {
+  const doc = { ...req.body }; delete doc.id; delete doc._id; doc.code = (doc.code || "").toUpperCase();
+  await db.collection("coupons").updateOne({ _id: new ObjectId(req.params.id) }, { $set: doc });
+  res.json(clean(await db.collection("coupons").findOne({ _id: new ObjectId(req.params.id) })));
+}));
+api.delete("/coupons/:id", requireAdmin(async (req, res) => { await db.collection("coupons").deleteOne({ _id: new ObjectId(req.params.id) }); res.json({ ok: true }); }));
+
+// ================= ORDERS =================
+function genOrderId() {
+  const d = new Date();
+  const ymd = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  return "TS" + ymd + crypto.randomBytes(3).toString("hex").slice(0, 5).toUpperCase();
+}
+api.post("/orders", async (req, res) => {
+  const b = req.body;
+  const settings = (await db.collection("settings").findOne({ key: "main" })) || {};
+  const items = b.items || [];
+  for (const it of items) {
+    try {
+      const prod = await db.collection("products").findOne({ _id: new ObjectId(it.product_id) });
+      if (prod) { const m = (prod.variants || []).find((v) => v.weight === it.weight); if (m) it.price = Number(m.price); }
+    } catch {}
+  }
+  const subtotal = Math.round(items.reduce((s, i) => s + i.price * i.quantity, 0) * 100) / 100;
+  if (subtotal <= 0) return res.status(400).json({ detail: "Cart is empty" });
+
+  let discount = 0;
+  if (b.coupon_code) {
+    const cr = await validateCouponLogic(b.coupon_code, subtotal);
+    if (cr.data) { discount = cr.data.discount; await db.collection("coupons").updateOne({ code: b.coupon_code.toUpperCase() }, { $inc: { used: 1 } }); }
+  }
+  const freeAbove = settings.free_shipping_above ?? 499;
+  const shipCharge = settings.shipping_charge ?? 49;
+  const shipping = subtotal - discount >= freeAbove ? 0 : (b.payment_method === "cod" ? shipCharge : 0);
+  const total = Math.round((subtotal - discount + shipping) * 100) / 100;
+
+  const user = await getTokenUser(req);
+  const oid = genOrderId();
+  const doc = {
+    order_id: oid, user_id: user ? user.id : null, items,
+    customer: { full_name: b.full_name, phone: b.phone, email: b.email },
+    shipping_address: { address: b.address, city: b.city, state: b.state, pincode: b.pincode },
+    subtotal, discount, shipping, total, coupon_code: b.coupon_code || null,
+    payment_method: b.payment_method || "cod", payment_status: "pending", status: "pending", notes: b.notes || "", created_at: nowIso(),
+  };
+  await db.collection("orders").insertOne(doc);
+  for (const it of items) { try { await db.collection("products").updateOne({ _id: new ObjectId(it.product_id), "variants.weight": it.weight }, { $inc: { "variants.$.stock": -it.quantity } }); } catch {} }
+
+  const result = { order_id: oid, total, subtotal, discount, shipping, payment_method: doc.payment_method };
+  if (doc.payment_method === "upi") {
+    const upiId = settings.upi_id || "theshutki@upi";
+    const upiName = settings.upi_name || "TheShutki";
+    const link = `upi://pay?pa=${upiId}&pn=${upiName}&am=${total}&cu=INR&tn=${oid}`;
+    result.upi_link = link;
+    result.qr = await QRCode.toDataURL(link);
+  }
+  res.json(result);
+});
+api.get("/orders/me", requireUser(async (req, res) => {
+  const docs = await db.collection("orders").find({ user_id: req.user.id }).sort({ created_at: -1 }).toArray();
+  res.json(docs.map(clean));
+}));
+api.get("/orders/:order_id", async (req, res) => {
+  const doc = await db.collection("orders").findOne({ order_id: req.params.order_id });
+  if (!doc) return res.status(404).json({ detail: "Order not found" });
+  res.json(clean(doc));
+});
+api.get("/admin/orders", requireAdmin(async (req, res) => {
+  const query = req.query.status ? { status: req.query.status } : {};
+  const docs = await db.collection("orders").find(query).sort({ created_at: -1 }).toArray();
+  res.json(docs.map(clean));
+}));
+api.patch("/admin/orders/:order_id/status", requireAdmin(async (req, res) => {
+  const update = { status: req.body.status };
+  if (req.body.status === "delivered") update.payment_status = "paid";
+  await db.collection("orders").updateOne({ order_id: req.params.order_id }, { $set: update });
+  res.json(clean(await db.collection("orders").findOne({ order_id: req.params.order_id })));
+}));
+api.patch("/admin/orders/:order_id/payment", requireAdmin(async (req, res) => {
+  await db.collection("orders").updateOne({ order_id: req.params.order_id }, { $set: { payment_status: req.body.status } });
+  res.json(clean(await db.collection("orders").findOne({ order_id: req.params.order_id })));
+}));
+
+// ================= REVIEWS =================
+api.get("/reviews", async (req, res) => {
+  const query = req.query.all === "true" ? {} : { active: true };
+  if (req.query.product_id) query.product_id = req.query.product_id;
+  const docs = await db.collection("reviews").find(query).sort({ created_at: -1 }).toArray();
+  res.json(docs.map(clean));
+});
+api.post("/reviews", requireAdmin(async (req, res) => {
+  const doc = { ...req.body, created_at: nowIso() };
+  const r = await db.collection("reviews").insertOne(doc);
+  res.json(clean(await db.collection("reviews").findOne({ _id: r.insertedId })));
+}));
+api.put("/reviews/:id", requireAdmin(async (req, res) => {
+  const doc = { ...req.body }; delete doc.id; delete doc._id;
+  await db.collection("reviews").updateOne({ _id: new ObjectId(req.params.id) }, { $set: doc });
+  res.json(clean(await db.collection("reviews").findOne({ _id: new ObjectId(req.params.id) })));
+}));
+api.delete("/reviews/:id", requireAdmin(async (req, res) => { await db.collection("reviews").deleteOne({ _id: new ObjectId(req.params.id) }); res.json({ ok: true }); }));
+
+// ================= RECIPES =================
+api.get("/recipes", async (req, res) => {
+  const query = req.query.featured === "true" ? { featured: true } : {};
+  const docs = await db.collection("recipes").find(query).sort({ order: 1 }).toArray();
+  res.json(docs.map(clean));
+});
+api.get("/recipes/:slug", async (req, res) => {
+  const doc = await db.collection("recipes").findOne({ slug: req.params.slug });
+  if (!doc) return res.status(404).json({ detail: "Recipe not found" });
+  res.json(clean(doc));
+});
+api.post("/recipes", requireAdmin(async (req, res) => {
+  const doc = { ...req.body }; doc.slug = doc.slug || slugify(doc.title);
+  if (await db.collection("recipes").findOne({ slug: doc.slug })) doc.slug = `${doc.slug}-${crypto.randomBytes(3).toString("hex")}`;
+  doc.created_at = nowIso();
+  const r = await db.collection("recipes").insertOne(doc);
+  res.json(clean(await db.collection("recipes").findOne({ _id: r.insertedId })));
+}));
+api.put("/recipes/:id", requireAdmin(async (req, res) => {
+  const doc = { ...req.body }; delete doc.id; delete doc._id; doc.slug = doc.slug || slugify(doc.title);
+  await db.collection("recipes").updateOne({ _id: new ObjectId(req.params.id) }, { $set: doc });
+  res.json(clean(await db.collection("recipes").findOne({ _id: new ObjectId(req.params.id) })));
+}));
+api.delete("/recipes/:id", requireAdmin(async (req, res) => { await db.collection("recipes").deleteOne({ _id: new ObjectId(req.params.id) }); res.json({ ok: true }); }));
+
+// ================= SETTINGS =================
+api.get("/settings", async (req, res) => {
+  const s = await db.collection("settings").findOne({ key: "main" });
+  res.json(s ? clean(s) : {});
+});
+api.put("/settings", requireAdmin(async (req, res) => {
+  const update = {}; for (const [k, v] of Object.entries(req.body)) if (v !== null && v !== undefined) update[k] = v;
+  delete update.id; delete update._id;
+  await db.collection("settings").updateOne({ key: "main" }, { $set: update }, { upsert: true });
+  res.json(clean(await db.collection("settings").findOne({ key: "main" })));
+}));
+
+// ================= ADMIN: customers / analytics / inventory =================
+api.get("/admin/customers", requireAdmin(async (req, res) => {
+  const users = await db.collection("users").find({ role: "customer" }).sort({ created_at: -1 }).toArray();
+  const out = [];
+  for (const u of users) {
+    const orders = await db.collection("orders").find({ user_id: String(u._id) }).toArray();
+    out.push({ id: String(u._id), name: u.name, email: u.email, phone: u.phone || "", created_at: u.created_at, orders_count: orders.length, total_spent: Math.round(orders.reduce((s, o) => s + (o.total || 0), 0) * 100) / 100 });
+  }
+  res.json(out);
+}));
+api.get("/admin/analytics", requireAdmin(async (req, res) => {
+  const orders = await db.collection("orders").find().toArray();
+  const paid = orders.filter((o) => o.payment_status === "paid" || o.status === "delivered");
+  const revenue = Math.round(orders.reduce((s, o) => s + (o.total || 0), 0) * 100) / 100;
+  const totalOrders = orders.length;
+  const aov = totalOrders ? Math.round((revenue / totalOrders) * 100) / 100 : 0;
+  const pending = orders.filter((o) => o.status === "pending").length;
+  const customers = await db.collection("users").countDocuments({ role: "customer" });
+  const counts = {};
+  for (const o of orders) for (const it of o.items || []) counts[it.name] = (counts[it.name] || 0) + it.quantity;
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, qty]) => ({ name, qty }));
+  const series = {};
+  for (const o of orders) { const d = (o.created_at || "").slice(0, 10); series[d] = (series[d] || 0) + (o.total || 0); }
+  const salesSeries = Object.entries(series).sort().map(([date, total]) => ({ date, total: Math.round(total * 100) / 100 })).slice(-7);
+  res.json({ revenue, total_orders: totalOrders, aov, pending_orders: pending, customers, paid_orders: paid.length, bestsellers: best, sales_series: salesSeries });
+}));
+api.get("/admin/inventory", requireAdmin(async (req, res) => {
+  const docs = await db.collection("products").find().toArray();
+  const out = docs.map((d) => {
+    const stock = (d.variants || []).reduce((s, v) => s + (v.stock || 0), 0);
+    return { id: String(d._id), name: d.name, stock, image: (d.images || [])[0], status: stock === 0 ? "out" : stock < 20 ? "low" : "ok" };
+  });
+  out.sort((a, b) => a.stock - b.stock);
+  res.json(out);
+}));
+
+// ================= UPLOAD / FILES =================
+api.post("/upload", requireAdmin(async (req, res) => {
+  upload.single("file")(req, res, (err) => {
+    if (err || !req.file) return res.status(400).json({ detail: "Upload failed" });
+    const filename = persistUpload(req.file);
+    res.json({ url: `/api/files/${filename}`, path: filename });
+  });
+}));
+api.use("/files", express.static(UPLOAD_DIR));
+
+// ================= SITEMAP =================
+api.get("/sitemap.xml", async (req, res) => {
+  const base = process.env.SITE_URL || "https://theshutki.com";
+  const products = await db.collection("products").find({}, { projection: { slug: 1 } }).toArray();
+  const urls = [`${base}/`, `${base}/shop`, `${base}/about`, `${base}/contact`, `${base}/recipes`].concat(products.map((p) => `${base}/products/${p.slug}`));
+  const body = urls.map((u) => `<url><loc>${u}</loc></url>`).join("");
+  res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}</urlset>`);
+});
+
+api.get("/", (req, res) => res.json({ message: "TheShutki API running" }));
+
+app.use("/api", api);
+
+// ---------- startup ----------
+(async () => {
+  await client.connect();
+  db = client.db(DB_NAME);
+  await seed(db);
+  app.listen(PORT, "0.0.0.0", () => console.log(`TheShutki backend (Node) running on :${PORT}`));
+})();
