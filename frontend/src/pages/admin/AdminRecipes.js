@@ -45,7 +45,7 @@ export default function AdminRecipes() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {recipes.map((r) => (
           <div key={r.id} className="bg-white rounded-2xl shadow-soft overflow-hidden" data-testid={`admin-recipe-${r.slug}`}>
-            <img src={r.image} alt={r.title} className="aspect-video w-full object-cover" />
+            {r.image ? <img src={r.image} alt={r.title} className="aspect-video w-full object-cover" /> : <div className="aspect-video w-full bg-sand" />}
             <div className="p-4">
               <p className="font-playfair font-bold text-ocean">{r.title}</p>
               <p className="text-xs text-charcoal/50 line-clamp-2 mt-1">{r.subtitle}</p>

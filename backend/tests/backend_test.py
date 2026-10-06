@@ -308,3 +308,98 @@ def test_reviews_list():
     r = requests.get(f"{API}/reviews")
     assert r.status_code == 200
     assert len(r.json()) >= 1
+
+
+# ---------------- auth config / provider gating (iteration 2) ----------------
+class TestAuthConfigGated:
+    def test_auth_config_disabled(self):
+        r = requests.get(f"{API}/auth/config")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["google_enabled"] is False
+        assert d["firebase_enabled"] is False
+
+    def test_google_login_not_configured(self):
+        r = requests.post(f"{API}/auth/google", json={"credential": "fake"})
+        assert r.status_code == 400
+
+    def test_firebase_login_not_configured(self):
+        r = requests.post(f"{API}/auth/firebase", json={"id_token": "fake"})
+        assert r.status_code == 400
+
+
+# ---------------- recipes (iteration 2) ----------------
+class TestRecipes:
+    def test_list_recipes(self):
+        r = requests.get(f"{API}/recipes")
+        assert r.status_code == 200
+        items = r.json()
+        assert isinstance(items, list)
+        assert len(items) >= 6
+        for rec in items:
+            assert "slug" in rec and "title" in rec
+            assert "_id" not in rec
+
+    def test_get_recipe_by_slug(self):
+        items = requests.get(f"{API}/recipes").json()
+        slug = items[0]["slug"]
+        r = requests.get(f"{API}/recipes/{slug}")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["slug"] == slug
+        assert "ingredients" in d
+        assert "steps" in d
+
+    def test_get_recipe_missing(self):
+        r = requests.get(f"{API}/recipes/nope-xyz")
+        assert r.status_code == 404
+
+    def test_create_requires_admin(self, customer_headers):
+        r = requests.post(f"{API}/recipes", headers=customer_headers,
+                          json={"title": "x", "slug": "x", "ingredients": [], "steps": []})
+        assert r.status_code == 403
+
+    def test_admin_recipe_crud(self, admin_headers):
+        slug = f"test-recipe-{uuid.uuid4().hex[:6]}"
+        payload = {
+            "title": "TEST Recipe",
+            "slug": slug,
+            "description": "A test",
+            "ingredients": ["salt", "fish"],
+            "steps": ["step 1", "step 2"],
+            "image": "https://example.com/img.jpg",
+            "featured": False,
+            "order": 99,
+        }
+        c = requests.post(f"{API}/recipes", headers=admin_headers, json=payload)
+        assert c.status_code == 200, c.text
+        rid = c.json()["id"]
+        # verify GET by slug persists
+        g = requests.get(f"{API}/recipes/{slug}")
+        assert g.status_code == 200
+        assert g.json()["title"] == "TEST Recipe"
+        # update
+        payload["title"] = "TEST Recipe Updated"
+        u = requests.put(f"{API}/recipes/{rid}", headers=admin_headers, json=payload)
+        assert u.status_code == 200
+        assert u.json()["title"] == "TEST Recipe Updated"
+        # delete
+        d = requests.delete(f"{API}/recipes/{rid}", headers=admin_headers)
+        assert d.status_code == 200
+        # verify gone
+        g2 = requests.get(f"{API}/recipes/{slug}")
+        assert g2.status_code == 404
+
+    def test_duplicate_slug_auto_suffixed(self, admin_headers):
+        # server policy: on duplicate slug it auto-appends a short suffix
+        items = requests.get(f"{API}/recipes").json()
+        existing_slug = items[0]["slug"]
+        r = requests.post(f"{API}/recipes", headers=admin_headers,
+                          json={"title": "dup", "slug": existing_slug,
+                                "ingredients": [], "steps": []})
+        assert r.status_code == 200
+        new_slug = r.json()["slug"]
+        assert new_slug != existing_slug and new_slug.startswith(existing_slug)
+        # cleanup
+        requests.delete(f"{API}/recipes/{r.json()['id']}", headers=admin_headers)
+

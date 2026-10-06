@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 2 — validated the new features: Recipe Stories, Order Tracking timeline, Signup math captcha, env-gated Google/Firebase sign-in disabled, and admin recipes CRUD + WhatsApp notify. Backend: 45/45 pytest passing (added TestRecipes + TestAuthConfigGated covering /api/recipes GET list/by-slug/404, admin recipe POST/PUT/DELETE with persistence verification, duplicate-slug auto-suffix behavior, /api/auth/config returning google_enabled=false & firebase_enabled=false, /api/auth/google and /api/auth/firebase returning 400 when unconfigured). Also re-ran full regression (products, coupons, orders COD+UPI+QR, admin analytics/orders/CRUD) — all green. Frontend (Playwright on preview URL): Home header shows RECIPES link, 'Cook It Like the Coast' section renders with 3 home-recipe cards; /recipes page lists 7 recipe-card tiles; clicking a card routes to /recipes/{slug} detail with ingredients & numbered steps. /account login page does NOT show Google button or Phone OTP section (correctly env-gated). Register form shows math captcha '(a + b = ?)'; wrong answer blocked with 'Incorrect captcha answer' toast and captcha regenerates; correct answer registered a new user (toast 'Welcome to TheShutki!', redirected to logged-in account page with My Orders + Logout). Customer /account: 12 track-<order_id> buttons present; clicking expands [data-testid=order-timeline]. Admin /admin/orders: order detail modal shows 'Notify Customer on WhatsApp' link ([data-testid=whatsapp-notify]) with href starting with https://wa.me/<phone>?text=... prefilled with order id + status + total — verified. Admin /admin/recipes: admin-nav-recipes sidebar entry present; Add Recipe dialog creates recipe (title, ingredients one-per-line, steps one-per-line) and it appears in grid. Cleaned up TEST recipes via API after test.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/recipes", "issue": "Duplicate slug is silently auto-suffixed (slug-xxxxx) rather than returning 400. Not a bug per server policy, but admin UI may surprise user — consider surfacing a toast with final slug."},
+      {"endpoint": "/api/auth/config", "issue": "Returns the raw google_client_id / firebase config object even when disabled — currently harmless because values are empty, but keep the response minimal to avoid future accidental exposure."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AdminRecipes / Recipes list", "issue": "When a recipe has no image, <img> is rendered with src=\"\" which triggers a React warning ('An empty string (\"\") was passed to the src attribute') and causes the browser to re-request the current page. Guard with conditional rendering or pass null.", "selector": "img (recipe card)", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/account (register)", "issues": ["Toast 'Incorrect captcha answer' overlaps the top nav bar (positioned over header links). Consider offsetting toast below header or using sonner's position prop."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(LOW) Avoid rendering <img src=\"\"> on recipe cards without an image — use conditional render or placeholder.",
+    "(LOW) When admin creates a recipe with a slug that already exists, show a toast indicating the saved slug was auto-suffixed.",
+    "(carry-over from iter 1) CORS allow_credentials=True with allow_origins=['*'] is spec-invalid; order endpoint does not revalidate item prices from DB; GET /api/orders/{id} is public."
+  ],
+  "critical_code_review_comments": [
+    "server.py now ~1170 lines — recipe routes added inline; recommend extracting routers (auth, products, orders, recipes, admin).",
+    "/api/recipes DELETE/PUT don't 404 when ObjectId doesn't match — they return {ok:true}/null silently. Add existence check and 404 response.",
+    "Recipe POST does not validate list types for ingredients/steps beyond Pydantic defaults; consider length/content limits to prevent large payloads."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added TestAuthConfigGated + TestRecipes classes, 11 new tests)"
+  ],
+  "success_rate": {"backend": "100% (45/45 pytest)", "frontend": "100% of new-feature flows (recipes list/detail, captcha wrong+correct, order timeline expand, admin recipes create, admin orders WhatsApp notify, auth-gating hidden)"},
+  "test_credentials": "admin@theshutki.com / Shutki@2026 ; customer@test.com / Test@1234 ; Coupon FIRST10",
+  "seed_data_creation": "Created and cleaned up TEST_* recipes and a TEST_cap_* registered customer during Playwright flows. One TEST registered user remains (TEST_cap_*@test.com) — harmless.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/backend_test.py (pytest, 45 tests, uses REACT_APP_BACKEND_URL + /api). New data-testids verified: recipe-card-<slug>, home-recipe-<slug>, order-timeline, track-<orderId>, whatsapp-notify, captcha-question, captcha-answer, recipe-title, recipe-ingredients, recipe-steps, add-recipe, save-recipe, admin-nav-recipes. Note: the math captcha regenerates on each failed submit, so Playwright must re-read [data-testid=captcha-question] immediately before submission. Register placeholder is 'Full Name' (not 'Name'). Google/Firebase login remain intentionally hidden via /api/auth/config.",
+  "rca of the issue": "N/A — no blocking issues; only two low-priority FE polish items (empty <img src> on recipe cards without images, toast overlap with header)."
+}

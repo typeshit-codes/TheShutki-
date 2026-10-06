@@ -25,7 +25,7 @@ export default function Recipes() {
           {recipes.map((r) => (
             <Link key={r.id} to={`/recipes/${r.slug}`} data-testid={`recipe-card-${r.slug}`}
               className="group bg-white rounded-2xl shadow-soft hover:shadow-elevated transition-shadow overflow-hidden flex flex-col">
-              <div className="overflow-hidden"><img src={r.image} alt={r.title} loading="lazy" className="aspect-[4/3] w-full object-cover group-hover:scale-105 transition-transform duration-500" /></div>
+              <div className="overflow-hidden">{r.image ? <img src={r.image} alt={r.title} loading="lazy" className="aspect-[4/3] w-full object-cover group-hover:scale-105 transition-transform duration-500" /> : <div className="aspect-[4/3] w-full bg-sand" />}</div>
               <div className="p-5 flex flex-col flex-1">
                 <h3 className="font-playfair text-xl font-bold text-ocean">{r.title}</h3>
                 <p className="text-sm text-charcoal/60 mt-1.5 flex-1">{r.subtitle}</p>

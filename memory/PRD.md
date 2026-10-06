@@ -29,11 +29,17 @@ Build a premium, modern, fully responsive e-commerce website for a dry-fish (Shu
 - Tested: 36/36 backend API tests pass; critical frontend flows pass.
 
 ## Backlog / Remaining
-- P1: Wire real payment gateways (Razorpay/Stripe/Cashfree/PhonePe) once keys provided.
-- P1: Phone OTP login, Google social login, signup captcha (requested extras).
-- P2: Require auth for order creation + protect order-by-id endpoint (PII); decrement stock only on payment confirmation.
-- P2: Product structured data (JSON-LD) per PDP; per-product reviews submission by customers.
-- P2: Split server.py into routers/services.
+- Activate Firebase Phone OTP + Google sign-in (scaffolded, env-gated) once keys are added.
+- P2: require auth for order creation + protect order-by-id endpoint; decrement stock only on payment confirmation.
+
+## Added 2026-06 (iteration 2)
+- Recipe Stories: 6 AI-illustrated coastal recipes, `/recipes` + `/recipes/:slug`, homepage "Cook It Like the Coast" section, full admin CRUD (`/admin/recipes`).
+- Order Tracking: 7-stage timeline on order confirmation + expandable in customer account; admin "Notify Customer on WhatsApp" click-to-send (wa.me, no keys).
+- Signup math captcha (built-in) on registration.
+- Env-gated Google sign-in (`GOOGLE_CLIENT_ID`) + Firebase Phone OTP (`FIREBASE_*`) — backend verifies via google-auth; frontend buttons appear only when `/api/auth/config` reports enabled.
+- Homepage marquee strip + recipes section.
+- Tested: 45/45 backend pytest pass; all new frontend flows pass.
+
 
 ## Credentials
 - Admin: admin@theshutki.com / Shutki@2026
