@@ -19,7 +19,10 @@ export default function AdminSettings() {
   const save = async () => {
     setSaving(true);
     try {
-      await api.put("/settings", s); refreshSettings(); toast.success("Settings saved");
+      const payload = { ...s };
+      delete payload.shiprocket_configured;
+      if (!payload.shiprocket_api_password) delete payload.shiprocket_api_password;
+      await api.put("/settings", payload); refreshSettings(); toast.success("Settings saved");
     } catch { toast.error("Failed to save"); } finally { setSaving(false); }
   };
 
@@ -95,6 +98,16 @@ export default function AdminSettings() {
           <Field label="Firebase API Key" k="firebase_api_key" />
           <Field label="Firebase Auth Domain" k="firebase_auth_domain" />
           <Field label="Firebase Project ID" k="firebase_project_id" />
+        </Card>
+
+        <Card title="Shipping — Shiprocket">
+          <p className="text-xs text-charcoal/50">Enter your Shiprocket API-user credentials (Shiprocket Panel → Settings → API → Create API User). Then you can push orders to Shiprocket and track them from the Orders page. The password is stored securely and never sent back to the browser.</p>
+          <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={!!s.shiprocket_enabled} onChange={(e) => setS({ ...s, shiprocket_enabled: e.target.checked })} data-testid="set-shiprocket_enabled" /> Enable Shiprocket</label>
+          <Field label="API User Email" k="shiprocket_api_email" />
+          <div><label className="text-xs uppercase tracking-widest text-ocean/60 font-semibold">API User Password {s.shiprocket_configured ? "(set — leave blank to keep)" : ""}</label>
+            <input className={`${inp} mt-1`} type="password" placeholder={s.shiprocket_configured ? "••••••••" : "Enter password"} value={s.shiprocket_api_password || ""} onChange={set("shiprocket_api_password")} data-testid="set-shiprocket_password" /></div>
+          <Field label="Pickup Location (as named in Shiprocket)" k="shiprocket_pickup_location" />
+          <Field label="Pickup Pincode (for rate/serviceability check)" k="shiprocket_pickup_postcode" />
         </Card>
       </div>
     </div>

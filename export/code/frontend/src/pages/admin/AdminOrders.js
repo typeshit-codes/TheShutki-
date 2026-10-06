@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, Truck } from "lucide-react";
 import { toast } from "sonner";
 import api, { inr } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,6 +30,14 @@ export default function AdminOrders() {
     if (sel?.order_id === id) setSel({ ...sel, status });
   };
   const markPaid = async (id) => { await api.patch(`/admin/orders/${id}/payment`, { status: "paid" }); toast.success("Marked paid"); load(); };
+
+  const shipOrder = async (id) => {
+    try {
+      const { data } = await api.post(`/admin/orders/${id}/ship`, {});
+      toast.success(data.awb ? `Shipped! AWB ${data.awb}` : "Pushed to Shiprocket");
+      setSel((p) => ({ ...p, shipping: data, status: "shipped" })); load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Shiprocket failed"); }
+  };
 
   return (
     <div>
@@ -88,6 +96,20 @@ export default function AdminOrders() {
                   className="flex items-center justify-center gap-2 w-full py-2.5 rounded-full bg-green-500 text-white text-sm font-semibold hover:bg-green-600 transition-colors">
                   <MessageCircle size={16} /> Notify Customer on WhatsApp
                 </a>
+                <div className="border-t border-sand pt-3">
+                  <p className="font-semibold text-ocean text-sm mb-2 flex items-center gap-2"><Truck size={15} /> Shiprocket Fulfilment</p>
+                  {sel.shipping?.awb ? (
+                    <div className="text-sm space-y-1">
+                      <p>AWB: <span className="font-semibold text-ocean">{sel.shipping.awb}</span> {sel.shipping.courier_name && `· ${sel.shipping.courier_name}`}</p>
+                      {sel.shipping.label_url && <a href={sel.shipping.label_url} target="_blank" rel="noreferrer" className="text-sunset font-semibold underline">Download Shipping Label</a>}
+                    </div>
+                  ) : sel.shipping?.shipment_id ? (
+                    <p className="text-sm text-charcoal/60">Pushed to Shiprocket (shipment #{sel.shipping.shipment_id}). AWB pending.</p>
+                  ) : (
+                    <button onClick={() => shipOrder(sel.order_id)} data-testid="ship-order"
+                      className="w-full py-2.5 rounded-full bg-ocean text-cream text-sm font-semibold hover:bg-ocean-light transition-colors">Ship with Shiprocket</button>
+                  )}
+                </div>
               </div>
             </>
           )}

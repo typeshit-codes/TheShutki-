@@ -39,9 +39,22 @@ export default function ProductDetail() {
   const inStock = (v.stock ?? 0) > 0;
   const images = product.images?.length ? product.images : [""];
 
-  const checkPin = () => {
-    if (/^\d{6}$/.test(pincode)) setPinMsg(`✓ Delivery available to ${pincode}. Estimated 3–6 days.`);
-    else setPinMsg("Please enter a valid 6-digit pincode.");
+  const checkPin = async () => {
+    if (!/^\d{6}$/.test(pincode)) { setPinMsg("Please enter a valid 6-digit pincode."); return; }
+    setPinMsg("Checking…");
+    try {
+      const { data } = await api.get(`/shipping/serviceability?delivery_postcode=${pincode}&weight=0.5`);
+      if (data.enabled && data.couriers?.length) {
+        const c = data.couriers[0];
+        setPinMsg(`✓ Delivery available to ${pincode}. Est. ${c.days || "3–6"} days${c.rate ? ` · from ₹${c.rate}` : ""}.`);
+      } else if (data.enabled && data.serviceable === false) {
+        setPinMsg(`Sorry, we currently don't deliver to ${pincode}.`);
+      } else {
+        setPinMsg(`✓ Delivery available to ${pincode}. Estimated 3–6 days.`);
+      }
+    } catch {
+      setPinMsg(`✓ Delivery available to ${pincode}. Estimated 3–6 days.`);
+    }
   };
 
   return (

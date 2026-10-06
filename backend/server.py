@@ -16,6 +16,7 @@ from typing import List, Optional, Annotated, Any
 import jwt
 import bcrypt
 import qrcode
+import httpx
 import requests
 from bson import ObjectId
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Header, Query
@@ -303,6 +304,11 @@ class SettingsIn(BaseModel):
     firebase_api_key: Optional[str] = None
     firebase_auth_domain: Optional[str] = None
     firebase_project_id: Optional[str] = None
+    shiprocket_enabled: Optional[bool] = None
+    shiprocket_api_email: Optional[str] = None
+    shiprocket_api_password: Optional[str] = None
+    shiprocket_pickup_location: Optional[str] = None
+    shiprocket_pickup_postcode: Optional[str] = None
 
 
 # ------------------------------------------------------------------ helpers
@@ -826,7 +832,13 @@ async def delete_recipe(rid: str, admin: dict = Depends(require_admin)):
 @api.get("/settings")
 async def get_settings():
     s = await db.settings.find_one({"key": "main"})
-    return clean(s) if s else {}
+    if not s:
+        return {}
+    out = clean(s)
+    # never expose the Shiprocket password to the client
+    out["shiprocket_configured"] = bool(out.get("shiprocket_api_password") or os.environ.get("SHIPROCKET_API_PASSWORD"))
+    out.pop("shiprocket_api_password", None)
+    return out
 
 
 @api.put("/settings")
@@ -915,6 +927,126 @@ async def serve_file(path: str):
 
 
 # ------------------------------------------------------------------ sitemap / robots
+# ------------------------------------------------------------------ shiprocket
+SHIPROCKET_BASE = os.environ.get("SHIPROCKET_BASE_URL", "https://apiv2.shiprocket.in/v1/external")
+_sr_token = {"val": None, "exp": 0}
+
+
+async def sr_config():
+    s = await db.settings.find_one({"key": "main"}) or {}
+    email = (s.get("shiprocket_api_email") or os.environ.get("SHIPROCKET_API_EMAIL") or "").strip()
+    pw = (s.get("shiprocket_api_password") or os.environ.get("SHIPROCKET_API_PASSWORD") or "").strip()
+    enabled = bool(s.get("shiprocket_enabled")) and bool(email and pw)
+    return {
+        "enabled": enabled, "email": email, "password": pw,
+        "pickup_location": (s.get("shiprocket_pickup_location") or os.environ.get("SHIPROCKET_PICKUP_LOCATION") or "Primary"),
+        "pickup_postcode": (s.get("shiprocket_pickup_postcode") or os.environ.get("SHIPROCKET_PICKUP_POSTCODE") or ""),
+    }
+
+
+async def sr_token(cfg):
+    import time as _t
+    if _sr_token["val"] and _sr_token["exp"] > _t.time() + 300:
+        return _sr_token["val"]
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(f"{SHIPROCKET_BASE}/auth/login", json={"email": cfg["email"], "password": cfg["password"]})
+        r.raise_for_status()
+        tok = r.json()["token"]
+    _sr_token["val"] = tok
+    _sr_token["exp"] = _t.time() + 9 * 24 * 3600
+    return tok
+
+
+async def sr_request(method, path, cfg, **kw):
+    tok = await sr_token(cfg)
+    headers = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=40) as c:
+        r = await c.request(method, f"{SHIPROCKET_BASE}{path}", headers=headers, **kw)
+        if r.status_code == 401:
+            _sr_token["val"] = None
+            tok = await sr_token(cfg)
+            headers["Authorization"] = f"Bearer {tok}"
+            r = await c.request(method, f"{SHIPROCKET_BASE}{path}", headers=headers, **kw)
+    if r.is_error:
+        raise HTTPException(status_code=502, detail=f"Shiprocket error: {r.text[:300]}")
+    return r.json()
+
+
+@api.get("/shipping/serviceability")
+async def shipping_serviceability(delivery_postcode: str, weight: float = 0.5, cod: int = 0):
+    cfg = await sr_config()
+    if not cfg["enabled"]:
+        return {"enabled": False}
+    pickup = cfg["pickup_postcode"]
+    if not pickup:
+        return {"enabled": True, "couriers": [], "message": "Set a pickup pincode in admin settings."}
+    data = await sr_request("GET", "/courier/serviceability/", cfg, params={
+        "pickup_postcode": pickup, "delivery_postcode": delivery_postcode, "weight": weight, "cod": cod})
+    couriers = (data.get("data") or {}).get("available_courier_companies", []) or []
+    return {"enabled": True, "serviceable": len(couriers) > 0,
+            "couriers": [{"name": c.get("courier_name"), "rate": c.get("rate"),
+                          "days": c.get("estimated_delivery_days"), "etd": c.get("etd")} for c in couriers[:5]]}
+
+
+@api.post("/admin/orders/{order_id}/ship")
+async def ship_order(order_id: str, body: dict = {}, admin: dict = Depends(require_admin)):
+    cfg = await sr_config()
+    if not cfg["enabled"]:
+        raise HTTPException(status_code=503, detail="Shiprocket is not configured. Add credentials in Admin → Settings.")
+    o = await db.orders.find_one({"order_id": order_id})
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if (o.get("shipping") or {}).get("shipment_id"):
+        return o["shipping"]
+    addr = o.get("shipping_address", {})
+    cust = o.get("customer", {})
+    full = cust.get("full_name", "")
+    weight = max(0.3, round(sum(it.get("quantity", 1) for it in o.get("items", [])) * 0.3, 2))
+    order_body = {
+        "order_id": order_id, "order_date": (o.get("created_at") or now_iso())[:16].replace("T", " "),
+        "pickup_location": cfg["pickup_location"],
+        "billing_customer_name": full, "billing_last_name": "", "billing_address": addr.get("address", ""),
+        "billing_city": addr.get("city", ""), "billing_pincode": addr.get("pincode", ""),
+        "billing_state": addr.get("state", ""), "billing_country": "India",
+        "billing_email": cust.get("email", "") or "na@theshutki.com", "billing_phone": cust.get("phone", ""),
+        "shipping_is_billing": True,
+        "order_items": [{"name": it["name"], "sku": (it.get("weight", "") + "-" + it["name"])[:40],
+                         "units": it["quantity"], "selling_price": it["price"]} for it in o.get("items", [])],
+        "payment_method": "COD" if o.get("payment_method") == "cod" else "Prepaid",
+        "sub_total": o.get("subtotal", 0), "length": 20, "breadth": 15, "height": 10, "weight": weight,
+    }
+    created = await sr_request("POST", "/orders/create/adhoc", cfg, json=order_body)
+    sid = created.get("shipment_id")
+    shipping = {"provider": "shiprocket", "shiprocket_order_id": created.get("order_id"),
+                "shipment_id": sid, "status": created.get("status"), "awb": None, "label_url": None,
+                "courier_name": None}
+    try:
+        awb = await sr_request("POST", "/courier/assign/awb", cfg, json={"shipment_id": sid,
+              **({"courier_id": body.get("courier_id")} if body.get("courier_id") else {})})
+        ad = (awb.get("response") or {}).get("data") or {}
+        shipping["awb"] = ad.get("awb_code")
+        shipping["courier_name"] = ad.get("courier_name")
+    except HTTPException:
+        pass
+    try:
+        label = await sr_request("POST", "/courier/generate/label", cfg, json={"shipment_id": [sid]})
+        shipping["label_url"] = label.get("label_url")
+    except HTTPException:
+        pass
+    await db.orders.update_one({"order_id": order_id}, {"$set": {"shipping": shipping, "status": "shipped"}})
+    return shipping
+
+
+@api.get("/admin/orders/{order_id}/tracking")
+async def track_order(order_id: str, admin: dict = Depends(require_admin)):
+    cfg = await sr_config()
+    o = await db.orders.find_one({"order_id": order_id})
+    awb = (o or {}).get("shipping", {}).get("awb") if o else None
+    if not cfg["enabled"] or not awb:
+        raise HTTPException(status_code=404, detail="No shipment/AWB for this order")
+    return await sr_request("GET", f"/courier/track/awb/{awb}", cfg)
+
+
 @api.get("/sitemap.xml")
 async def sitemap():
     base = os.environ.get("SITE_URL", "https://theshutki.com")

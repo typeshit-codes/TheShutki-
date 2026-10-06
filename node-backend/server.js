@@ -407,7 +407,11 @@ api.delete("/recipes/:id", requireAdmin(async (req, res) => { await db.collectio
 // ================= SETTINGS =================
 api.get("/settings", async (req, res) => {
   const s = await db.collection("settings").findOne({ key: "main" });
-  res.json(s ? clean(s) : {});
+  if (!s) return res.json({});
+  const out = clean(s);
+  out.shiprocket_configured = !!(out.shiprocket_api_password || process.env.SHIPROCKET_API_PASSWORD);
+  delete out.shiprocket_api_password;
+  res.json(out);
 });
 api.put("/settings", requireAdmin(async (req, res) => {
   const update = {}; for (const [k, v] of Object.entries(req.body)) if (v !== null && v !== undefined) update[k] = v;
@@ -461,6 +465,79 @@ api.post("/upload", requireAdmin(async (req, res) => {
   });
 }));
 api.use("/files", express.static(UPLOAD_DIR));
+
+// ================= SHIPROCKET =================
+const SHIPROCKET_BASE = process.env.SHIPROCKET_BASE_URL || "https://apiv2.shiprocket.in/v1/external";
+let srTokenCache = { val: null, exp: 0 };
+async function srConfig() {
+  const s = (await db.collection("settings").findOne({ key: "main" })) || {};
+  const email = (s.shiprocket_api_email || process.env.SHIPROCKET_API_EMAIL || "").trim();
+  const pw = (s.shiprocket_api_password || process.env.SHIPROCKET_API_PASSWORD || "").trim();
+  return { enabled: !!s.shiprocket_enabled && !!(email && pw), email, password: pw,
+    pickup_location: s.shiprocket_pickup_location || process.env.SHIPROCKET_PICKUP_LOCATION || "Primary",
+    pickup_postcode: s.shiprocket_pickup_postcode || process.env.SHIPROCKET_PICKUP_POSTCODE || "" };
+}
+async function srToken(cfg) {
+  if (srTokenCache.val && srTokenCache.exp > Date.now() + 300000) return srTokenCache.val;
+  const r = await fetch(`${SHIPROCKET_BASE}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: cfg.email, password: cfg.password }) });
+  if (!r.ok) throw new Error("auth failed");
+  const d = await r.json();
+  srTokenCache = { val: d.token, exp: Date.now() + 9 * 864e5 };
+  return d.token;
+}
+async function srRequest(method, path, cfg, { params, body } = {}) {
+  let url = `${SHIPROCKET_BASE}${path}`;
+  if (params) url += "?" + new URLSearchParams(params).toString();
+  const doCall = async () => fetch(url, { method, headers: { Authorization: `Bearer ${await srToken(cfg)}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  let r = await doCall();
+  if (r.status === 401) { srTokenCache.val = null; r = await doCall(); }
+  if (!r.ok) throw Object.assign(new Error("shiprocket"), { status: 502, text: (await r.text()).slice(0, 300) });
+  return r.json();
+}
+api.get("/shipping/serviceability", async (req, res) => {
+  const cfg = await srConfig();
+  if (!cfg.enabled) return res.json({ enabled: false });
+  if (!cfg.pickup_postcode) return res.json({ enabled: true, couriers: [], message: "Set a pickup pincode in admin settings." });
+  try {
+    const data = await srRequest("GET", "/courier/serviceability/", cfg, { params: { pickup_postcode: cfg.pickup_postcode, delivery_postcode: req.query.delivery_postcode, weight: req.query.weight || 0.5, cod: req.query.cod || 0 } });
+    const couriers = (data.data?.available_courier_companies || []).slice(0, 5).map((c) => ({ name: c.courier_name, rate: c.rate, days: c.estimated_delivery_days, etd: c.etd }));
+    res.json({ enabled: true, serviceable: couriers.length > 0, couriers });
+  } catch (e) { res.status(e.status || 502).json({ detail: e.text || "Shiprocket error" }); }
+});
+api.post("/admin/orders/:order_id/ship", requireAdmin(async (req, res) => {
+  const cfg = await srConfig();
+  if (!cfg.enabled) return res.status(503).json({ detail: "Shiprocket is not configured. Add credentials in Admin → Settings." });
+  const o = await db.collection("orders").findOne({ order_id: req.params.order_id });
+  if (!o) return res.status(404).json({ detail: "Order not found" });
+  if (o.shipping?.shipment_id) return res.json(o.shipping);
+  const addr = o.shipping_address || {}, cust = o.customer || {};
+  const weight = Math.max(0.3, Math.round((o.items || []).reduce((s, it) => s + (it.quantity || 1), 0) * 0.3 * 100) / 100);
+  const orderBody = {
+    order_id: req.params.order_id, order_date: (o.created_at || nowIso()).slice(0, 16).replace("T", " "),
+    pickup_location: cfg.pickup_location, billing_customer_name: cust.full_name || "", billing_last_name: "",
+    billing_address: addr.address || "", billing_city: addr.city || "", billing_pincode: addr.pincode || "",
+    billing_state: addr.state || "", billing_country: "India", billing_email: cust.email || "na@theshutki.com",
+    billing_phone: cust.phone || "", shipping_is_billing: true,
+    order_items: (o.items || []).map((it) => ({ name: it.name, sku: `${it.weight}-${it.name}`.slice(0, 40), units: it.quantity, selling_price: it.price })),
+    payment_method: o.payment_method === "cod" ? "COD" : "Prepaid", sub_total: o.subtotal || 0, length: 20, breadth: 15, height: 10, weight,
+  };
+  try {
+    const created = await srRequest("POST", "/orders/create/adhoc", cfg, { body: orderBody });
+    const sid = created.shipment_id;
+    const shipping = { provider: "shiprocket", shiprocket_order_id: created.order_id, shipment_id: sid, status: created.status, awb: null, label_url: null, courier_name: null };
+    try { const awb = await srRequest("POST", "/courier/assign/awb", cfg, { body: { shipment_id: sid, ...(req.body.courier_id ? { courier_id: req.body.courier_id } : {}) } }); const ad = awb.response?.data || {}; shipping.awb = ad.awb_code; shipping.courier_name = ad.courier_name; } catch {}
+    try { const label = await srRequest("POST", "/courier/generate/label", cfg, { body: { shipment_id: [sid] } }); shipping.label_url = label.label_url; } catch {}
+    await db.collection("orders").updateOne({ order_id: req.params.order_id }, { $set: { shipping, status: "shipped" } });
+    res.json(shipping);
+  } catch (e) { res.status(e.status || 502).json({ detail: e.text || "Shiprocket error" }); }
+}));
+api.get("/admin/orders/:order_id/tracking", requireAdmin(async (req, res) => {
+  const cfg = await srConfig();
+  const o = await db.collection("orders").findOne({ order_id: req.params.order_id });
+  const awb = o?.shipping?.awb;
+  if (!cfg.enabled || !awb) return res.status(404).json({ detail: "No shipment/AWB for this order" });
+  try { res.json(await srRequest("GET", `/courier/track/awb/${awb}`, cfg)); } catch (e) { res.status(e.status || 502).json({ detail: e.text || "Shiprocket error" }); }
+}));
 
 // ================= SITEMAP =================
 api.get("/sitemap.xml", async (req, res) => {
