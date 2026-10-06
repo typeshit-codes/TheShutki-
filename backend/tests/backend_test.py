@@ -403,3 +403,81 @@ class TestRecipes:
         # cleanup
         requests.delete(f"{API}/recipes/{r.json()['id']}", headers=admin_headers)
 
+
+
+# ---------------- shiprocket (iteration 3, disabled/gated) ----------------
+class TestShiprocketGated:
+    def test_serviceability_disabled_returns_enabled_false(self):
+        r = requests.get(f"{API}/shipping/serviceability", params={"delivery_postcode": "110002"})
+        assert r.status_code == 200
+        d = r.json()
+        assert d.get("enabled") is False
+
+    def test_public_settings_never_exposes_password(self):
+        r = requests.get(f"{API}/settings")
+        assert r.status_code == 200
+        d = r.json()
+        assert "shiprocket_api_password" not in d
+        assert "shiprocket_configured" in d
+        assert isinstance(d["shiprocket_configured"], bool)
+
+    def test_ship_requires_auth(self):
+        r = requests.post(f"{API}/admin/orders/TS000000/ship", json={})
+        assert r.status_code == 401
+
+    def test_ship_requires_admin(self, customer_headers):
+        r = requests.post(f"{API}/admin/orders/TS000000/ship", headers=customer_headers, json={})
+        assert r.status_code == 403
+
+    def test_ship_disabled_returns_503(self, admin_headers):
+        # Any order id — Shiprocket gating is checked BEFORE order lookup
+        r = requests.post(f"{API}/admin/orders/TS000000/ship", headers=admin_headers, json={})
+        assert r.status_code == 503
+        detail = (r.json().get("detail") or "").lower()
+        assert "shiprocket" in detail
+
+    def test_put_settings_saves_shiprocket_and_hides_password_and_blank_does_not_wipe(self, admin_headers):
+        # Snapshot current settings
+        current = requests.get(f"{API}/settings").json()
+        snapshot = {k: current.get(k) for k in [
+            "shiprocket_enabled", "shiprocket_api_email",
+            "shiprocket_pickup_location", "shiprocket_pickup_postcode"]}
+        try:
+            # Save a password + email + enabled
+            payload = {
+                "shiprocket_enabled": True,
+                "shiprocket_api_email": "TEST_shiprocket@example.com",
+                "shiprocket_api_password": "TEST_SR_pw_123",
+                "shiprocket_pickup_location": "TEST_Primary",
+                "shiprocket_pickup_postcode": "110002",
+            }
+            u = requests.put(f"{API}/settings", headers=admin_headers, json=payload)
+            assert u.status_code == 200
+
+            # Public GET must hide password; shiprocket_configured must be True
+            g = requests.get(f"{API}/settings").json()
+            assert "shiprocket_api_password" not in g
+            assert g.get("shiprocket_configured") is True
+            assert g.get("shiprocket_api_email") == "TEST_shiprocket@example.com"
+            assert g.get("shiprocket_enabled") is True
+
+            # Simulate frontend behavior: PUT without password should not wipe existing password
+            u2 = requests.put(f"{API}/settings", headers=admin_headers, json={
+                "shiprocket_api_email": "TEST_shiprocket2@example.com"})
+            assert u2.status_code == 200
+            g2 = requests.get(f"{API}/settings").json()
+            assert g2.get("shiprocket_configured") is True  # password preserved
+            assert g2.get("shiprocket_api_email") == "TEST_shiprocket2@example.com"
+        finally:
+            # RESET to demo/disabled state
+            reset = {
+                "shiprocket_enabled": False,
+                "shiprocket_api_email": snapshot.get("shiprocket_api_email") or "",
+                "shiprocket_api_password": "",
+                "shiprocket_pickup_location": snapshot.get("shiprocket_pickup_location") or "",
+                "shiprocket_pickup_postcode": snapshot.get("shiprocket_pickup_postcode") or "",
+            }
+            requests.put(f"{API}/settings", headers=admin_headers, json=reset)
+            final = requests.get(f"{API}/settings").json()
+            assert final.get("shiprocket_configured") is False
+            assert final.get("shiprocket_enabled") in (False, None)

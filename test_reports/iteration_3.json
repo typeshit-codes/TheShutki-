@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 3 — validated Shiprocket integration gating. Backend: 51/51 pytest passing. Added TestShiprocketGated class (6 new tests) covering: (1) GET /api/shipping/serviceability?delivery_postcode=110002 returns {enabled:false} when Shiprocket is disabled; (2) GET /api/settings never includes 'shiprocket_api_password' and always exposes boolean 'shiprocket_configured'; (3) POST /api/admin/orders/{id}/ship requires auth (401) and admin role (403); (4) When Shiprocket is disabled, /api/admin/orders/{id}/ship returns 503 with detail 'Shiprocket is not configured. Add credentials in Admin → Settings.'; (5) PUT /api/settings with enabled+email+password+pickup → subsequent GET hides password, flips shiprocket_configured to true, exposes email/enabled; (6) subsequent PUT WITHOUT password does NOT wipe the stored password (shiprocket_configured still true). Teardown resets all shiprocket_* fields back to blank/false (verified post-run: shiprocket_configured=false, shiprocket_enabled=false, no password field present). Frontend (Playwright on preview URL): /admin/settings shows 'Shipping — Shiprocket' card with all five fields (set-shiprocket_enabled toggle, set-shiprocket_api_email, set-shiprocket_password [type=password], set-shiprocket_pickup_location, set-shiprocket_pickup_postcode). /admin/orders → clicking an order row opens detail dialog with [data-testid=ship-order] 'Ship with Shiprocket' button; clicking it while disabled triggers a visible error toast exactly matching the backend detail ('Shiprocket is not configured. Add credentials in Admin → Settings.') and the network tab shows 503. Product page /products/premium-nethili-shutki: pincode checker calls /api/shipping/serviceability?delivery_postcode=110002&weight=0.5 and falls back gracefully to '✓ Delivery available to 110002. Estimated 3–6 days.' when Shiprocket is disabled. Regression PASSED end-to-end: added Nethili Shutki to cart, applied FIRST10 (saved ₹29.9), proceeded to checkout, filled address (chk-* / checkout-* testids), selected COD, Place Order → redirected to /order-confirmation/TS261006EDBC5 showing full 7-step order-timeline. Admin login works; /admin dashboard analytics (Revenue / Total Orders / AOV) render. Recipes list still renders 6 recipe-cards.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/settings", "issue": "Response body of the PUT itself still contains 'shiprocket_api_password' (the GET redaction is applied only on GET /api/settings). Low risk since only an authenticated admin receives it right after setting it, but for defense-in-depth consider redacting on PUT too."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(LOW, optional) Redact shiprocket_api_password from PUT /api/settings response as well — mirror GET /api/settings redaction — defense in depth.",
+    "(carry-over) Previous iteration low-pri notes still open: <img src=\"\"> on recipe cards without image; auto-suffixed slug UX hint; CORS allow_credentials=true with allow_origins=['*']."
+  ],
+  "critical_code_review_comments": [
+    "sr_token caches globally in process memory ({_sr_token} dict) — if the admin changes credentials in Settings while a cached token exists, the old token is still used until it 401s (code already retries once on 401, so acceptable, but worth a short comment).",
+    "sr_request raises HTTPException(502) with raw Shiprocket text (truncated to 300 chars). Fine for admin, but ensure it isn't surfaced to end users via /api/shipping/serviceability — currently it is: a public caller could trigger a 502 with upstream error text if admin saved broken creds. Consider catching and returning {enabled:true, couriers:[], message:'temporarily unavailable'} instead.",
+    "server.py has grown past 1300 lines; still recommend extracting routers (auth / products / orders / recipes / shiprocket / admin / settings).",
+    "GET /api/orders/{id} remains public (no auth) — anyone with an order id can view full address and items. Flagged in iter 1 — still open."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added TestShiprocketGated class — 6 new tests, 51 total passing)"
+  ],
+  "success_rate": {"backend": "100% (51/51 pytest)", "frontend": "100% of requested flows (shiprocket card UI, ship-order error toast, pincode fallback, cart+FIRST10+COD→confirmation+timeline, admin dashboard, recipes list)"},
+  "test_credentials": "admin@theshutki.com / Shutki@2026 ; customer@test.com / Test@1234 ; Coupon FIRST10",
+  "seed_data_creation": "Placed one TEST COD order (TS261006EDBC5) during Playwright regression; shiprocket settings were temporarily populated then RESET to blank/disabled (verified post-run via GET /api/settings).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/backend_test.py — 51 tests, all green. Shiprocket is intentionally disabled; any test that touches shiprocket config MUST clean up by PUT'ing shiprocket_enabled=false and shiprocket_api_password='' (see TestShiprocketGated.test_put_settings_... for the pattern). Frontend data-testids verified this iteration: set-shiprocket_enabled, set-shiprocket_api_email, set-shiprocket_password (type=password), set-shiprocket_pickup_location, set-shiprocket_pickup_postcode, ship-order, pincode-input, pincode-check, pincode-msg, pdp-add-to-cart, apply-coupon, checkout-name/phone/email/address/city/state/pincode, pay-cod, place-order, order-timeline. Product routes are /products/:slug (NOT /product/:slug). Checkout fields use testid prefix 'checkout-' not 'chk-'. Cart 'Proceed to Checkout' is a <button>, not an <a href>.",
+  "rca of the issue": "N/A — no bugs found this iteration. One minor defense-in-depth suggestion (redact password from PUT response) and one potential public-surface risk from upstream Shiprocket error text if admin ever saves broken credentials — both documented above."
+}

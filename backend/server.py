@@ -845,7 +845,11 @@ async def get_settings():
 async def update_settings(body: SettingsIn, admin: dict = Depends(require_admin)):
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     await db.settings.update_one({"key": "main"}, {"$set": update}, upsert=True)
-    return clean(await db.settings.find_one({"key": "main"}))
+    s = await db.settings.find_one({"key": "main"})
+    out = clean(s)
+    out["shiprocket_configured"] = bool(out.get("shiprocket_api_password") or os.environ.get("SHIPROCKET_API_PASSWORD"))
+    out.pop("shiprocket_api_password", None)
+    return out
 
 
 # ------------------------------------------------------------------ customers / analytics / inventory

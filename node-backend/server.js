@@ -417,7 +417,11 @@ api.put("/settings", requireAdmin(async (req, res) => {
   const update = {}; for (const [k, v] of Object.entries(req.body)) if (v !== null && v !== undefined) update[k] = v;
   delete update.id; delete update._id;
   await db.collection("settings").updateOne({ key: "main" }, { $set: update }, { upsert: true });
-  res.json(clean(await db.collection("settings").findOne({ key: "main" })));
+  const s = await db.collection("settings").findOne({ key: "main" });
+  const out = clean(s);
+  out.shiprocket_configured = !!(out.shiprocket_api_password || process.env.SHIPROCKET_API_PASSWORD);
+  delete out.shiprocket_api_password;
+  res.json(out);
 }));
 
 // ================= ADMIN: customers / analytics / inventory =================
