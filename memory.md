@@ -12,8 +12,8 @@ Replaced the FastAPI app (`server.py`, `requirements.txt`). HTTP tests remain in
 - Uploads: `backend/uploads/`, served at `/api/files/<filename>`
 - Admin: `admin@theshutki.com` / `Shutki@2026` (override with `ADMIN_PASSWORD`)
 - Env template: `backend/.env.example`
-- Local Atlas: `backend/.env` (gitignored) points at `cluster0.uvzwhrn.mongodb.net`, database `theshutki`. Same `MONGO_URL` must be pasted into hPanel environment variables. Do not commit the password.
+- Local Atlas: `backend/.env` stays on this machine only (gitignored). It points at `cluster0.uvzwhrn.mongodb.net`, database `theshutki`. Paste `MONGO_URL` and the other secrets into hPanel environment variables. Do not commit the password. Atlas Network Access must allow `0.0.0.0/0`.
 - Google sign-in: `GOOGLE_CLIENT_ID` is in `backend/.env`. The client secret is stored there too, but the API only checks the ID token audience, so the secret is unused. In Google Cloud, add the site origin (and `http://localhost:3000` for local) under Authorized JavaScript origins.
-- Phone OTP: Firebase project `theshutki` (`theshutki.firebaseapp.com`). Keys live in `backend/.env` and are sent to the browser by `GET /api/auth/config`. Enable the Phone provider in Firebase Authentication and add the site under Authorized domains.
+- Phone OTP: Firebase project `theshutki-a580d` (`theshutki-a580d.firebaseapp.com`). Keys live in `backend/.env` and are sent to the browser by `GET /api/auth/config`. Enable the Phone provider in Firebase Authentication and add the site under Authorized domains. On hPanel set `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, and `FIREBASE_PROJECT_ID` from that file.
 
 `node-backend/` and `export_node/backend/` are the same Node API (Hostinger export). Frontend still calls `REACT_APP_BACKEND_URL` + `/api`.
