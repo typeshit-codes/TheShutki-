@@ -11,7 +11,7 @@ Build a premium, modern, fully responsive e-commerce website for a dry-fish (Shu
 - Logo: user-supplied horizontal "TheShutki" wordmark
 
 ## Architecture
-- Backend: FastAPI + MongoDB (motor). JWT (bcrypt) auth, Bearer token. Object storage for admin uploads. qrcode for UPI QR.
+- Backend: Node.js + Express + MongoDB (`backend/server.js`). JWT (bcrypt) auth, Bearer token. Local disk uploads served at `/api/files`. qrcode for UPI QR. Replaced the earlier FastAPI app on 2026-10-06.
 - Frontend: React 19 (CRA/craco), Tailwind, Shadcn UI, framer-motion, recharts. Fonts: Playfair Display + Outfit.
 - State: localStorage-backed cart/wishlist + auth token via `context/store.js`.
 
