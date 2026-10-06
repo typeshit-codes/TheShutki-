@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Outlet, NavLink, Link } from "react-router-dom";
-import { LayoutDashboard, Package, ShoppingCart, Tags, Ticket, Users, Star, Settings, Menu, X, Home } from "lucide-react";
+import { LayoutDashboard, Package, ShoppingCart, Tags, Ticket, Users, Star, ChefHat, Settings, Menu, X, Home } from "lucide-react";
 
 const LINKS = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
@@ -10,6 +10,7 @@ const LINKS = [
   { to: "/admin/coupons", label: "Coupons", icon: Ticket },
   { to: "/admin/customers", label: "Customers", icon: Users },
   { to: "/admin/reviews", label: "Reviews", icon: Star },
+  { to: "/admin/recipes", label: "Recipes", icon: ChefHat },
   { to: "/admin/settings", label: "Settings", icon: Settings },
 ];
 

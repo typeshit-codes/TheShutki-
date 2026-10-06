@@ -1,11 +1,21 @@
 import React, { useEffect, useState } from "react";
+import { MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import api, { inr } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useStore } from "@/context/store";
 
 const STATUSES = ["pending", "confirmed", "processing", "packed", "shipped", "out_for_delivery", "delivered", "cancelled"];
 const COLORS = { pending: "bg-amber-100 text-amber-700", confirmed: "bg-blue-100 text-blue-700", processing: "bg-indigo-100 text-indigo-700", packed: "bg-purple-100 text-purple-700", shipped: "bg-cyan-100 text-cyan-700", out_for_delivery: "bg-teal-100 text-teal-700", delivered: "bg-green-100 text-green-700", cancelled: "bg-red-100 text-red-700" };
+
+const waLink = (o) => {
+  let phone = (o.customer?.phone || "").replace(/\D/g, "");
+  if (phone.length === 10) phone = "91" + phone;
+  const status = (o.status || "").replace(/_/g, " ");
+  const msg = `Hi ${o.customer?.full_name || ""}, update on your TheShutki order #${o.order_id}: it is now "${status}". Order total: ₹${o.total}. Thank you for shopping with TheShutki!`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+};
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
@@ -74,6 +84,10 @@ export default function AdminOrders() {
                   </div>
                   <div className="flex items-end">{sel.payment_status !== "paid" && <button onClick={() => markPaid(sel.order_id)} className="w-full py-2 rounded-full bg-green-600 text-white text-sm font-semibold" data-testid="mark-paid">Mark as Paid</button>}</div>
                 </div>
+                <a href={waLink(sel)} target="_blank" rel="noreferrer" data-testid="whatsapp-notify"
+                  className="flex items-center justify-center gap-2 w-full py-2.5 rounded-full bg-green-500 text-white text-sm font-semibold hover:bg-green-600 transition-colors">
+                  <MessageCircle size={16} /> Notify Customer on WhatsApp
+                </a>
               </div>
             </>
           )}

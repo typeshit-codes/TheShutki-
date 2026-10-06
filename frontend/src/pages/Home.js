@@ -32,6 +32,7 @@ export default function Home() {
   const [featured, setFeatured] = useState([]);
   const [categories, setCategories] = useState([]);
   const [reviews, setReviews] = useState([]);
+  const [recipes, setRecipes] = useState([]);
   const [filter, setFilter] = useState("All");
   const [rvIdx, setRvIdx] = useState(0);
 
@@ -40,6 +41,7 @@ export default function Home() {
     api.get("/products?is_combo=true").then((r) => setCombos(r.data)).catch(() => {});
     api.get("/categories").then((r) => setCategories(r.data)).catch(() => {});
     api.get("/reviews").then((r) => setReviews(r.data)).catch(() => {});
+    api.get("/recipes?featured=true").then((r) => setRecipes(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -82,6 +84,19 @@ export default function Home() {
           </motion.div>
         </div>
       </section>
+
+      {/* MARQUEE STRIP */}
+      <div className="bg-ocean text-cream py-3 overflow-hidden border-y border-cream/10">
+        <div className="flex gap-10 whitespace-nowrap animate-marquee w-max">
+          {Array.from({ length: 2 }).map((_, k) => (
+            <div key={k} className="flex gap-10 items-center text-sm font-medium tracking-wide">
+              {["Traditional Sun-Dried", "Hygienically Packed", "Pan-India Delivery", "Quality Selected", "Secure Payments", "Free Shipping on Prepaid", "Authentic Coastal Taste"].map((t) => (
+                <span key={t} className="flex items-center gap-10"><span>{t}</span><span className="text-sunset">◆</span></span>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* CATEGORIES */}
       <section className="max-w-[1440px] mx-auto px-5 md:px-8 py-14 md:py-20" data-testid="category-section">
@@ -301,6 +316,34 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* RECIPES */}
+      {recipes.length > 0 && (
+        <section className="max-w-[1440px] mx-auto px-5 md:px-8 py-14 md:py-20" data-testid="recipes-home-section">
+          <div className="flex items-end justify-between mb-10 flex-wrap gap-4">
+            <div>
+              <p className="text-xs md:text-sm uppercase tracking-[0.22em] font-semibold text-sunset mb-2">The Coastal Kitchen</p>
+              <h2 className="font-playfair text-3xl md:text-4xl lg:text-5xl font-bold text-ocean leading-tight">Cook It Like the Coast</h2>
+              <p className="text-charcoal/60 mt-3 text-base md:text-lg">Authentic Shutki recipes to try at home.</p>
+            </div>
+            <Link to="/recipes" className="hidden md:inline-flex items-center gap-2 px-6 py-3 rounded-full border border-ocean text-ocean font-semibold hover:bg-ocean hover:text-cream transition-colors">All Recipes <ArrowRight size={16} /></Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-8">
+            {recipes.slice(0, 3).map((r) => (
+              <Link key={r.id} to={`/recipes/${r.slug}`} data-testid={`home-recipe-${r.slug}`} className="group rounded-2xl overflow-hidden shadow-soft hover:shadow-elevated transition-shadow bg-white">
+                <div className="relative overflow-hidden">
+                  <img src={r.image} alt={r.title} loading="lazy" className="aspect-[4/3] w-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  <span className="absolute bottom-3 left-3 bg-cream/90 backdrop-blur text-ocean text-xs font-semibold px-2.5 py-1 rounded-full">{r.time} · {r.difficulty}</span>
+                </div>
+                <div className="p-5">
+                  <h3 className="font-playfair text-xl font-bold text-ocean group-hover:text-sunset transition-colors">{r.title}</h3>
+                  <p className="text-sm text-charcoal/60 mt-1.5 line-clamp-2">{r.subtitle}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* FAQ */}
       <section className="max-w-3xl mx-auto px-5 md:px-8 py-16 md:py-24" data-testid="faq-section">

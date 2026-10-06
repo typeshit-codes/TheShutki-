@@ -263,6 +263,21 @@ class ReviewIn(BaseModel):
     active: bool = True
 
 
+class RecipeIn(BaseModel):
+    title: str
+    slug: Optional[str] = None
+    subtitle: str = ""
+    image: str = ""
+    time: str = ""
+    serves: str = ""
+    difficulty: str = "Easy"
+    fish_used: str = ""
+    ingredients: List[str] = []
+    steps: List[str] = []
+    featured: bool = True
+    order: int = 0
+
+
 class SettingsIn(BaseModel):
     free_shipping_above: Optional[float] = None
     shipping_charge: Optional[float] = None
@@ -333,6 +348,75 @@ async def login(body: LoginIn, response: Response):
 async def logout(response: Response):
     response.delete_cookie("access_token", path="/")
     return {"ok": True}
+
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "").strip()
+
+
+@api.get("/auth/config")
+async def auth_config():
+    return {
+        "google_enabled": bool(GOOGLE_CLIENT_ID),
+        "google_client_id": GOOGLE_CLIENT_ID,
+        "firebase_enabled": bool(FIREBASE_PROJECT_ID and os.environ.get("FIREBASE_API_KEY", "").strip()),
+        "firebase": {
+            "apiKey": os.environ.get("FIREBASE_API_KEY", ""),
+            "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
+            "projectId": FIREBASE_PROJECT_ID,
+        },
+    }
+
+
+async def _issue_for_user(email: str, name: str, response: Response, phone: str = "", provider: str = ""):
+    email = (email or "").lower()
+    user = await db.users.find_one({"email": email}) if email else None
+    if not user and phone:
+        user = await db.users.find_one({"phone": phone})
+    if not user:
+        doc = {"name": name or (email.split("@")[0] if email else "Customer"),
+               "email": email or f"{phone}@phone.theshutki", "phone": phone,
+               "password_hash": hash_password(uuid.uuid4().hex), "role": "customer",
+               "provider": provider, "created_at": now_iso()}
+        res = await db.users.insert_one(doc)
+        uid = str(res.inserted_id)
+        role = "customer"
+    else:
+        uid = str(user["_id"])
+        role = user.get("role", "customer")
+        name = user.get("name", name)
+    token = create_access_token(uid, email, role)
+    set_auth_cookie(response, token)
+    return {"id": uid, "name": name, "email": email, "role": role, "token": token}
+
+
+@api.post("/auth/google")
+async def auth_google(body: dict, response: Response):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=400, detail="Google sign-in is not configured")
+    credential = body.get("credential")
+    try:
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+        info = google_id_token.verify_oauth2_token(credential, google_requests.Request(), GOOGLE_CLIENT_ID)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Google credential")
+    return await _issue_for_user(info.get("email"), info.get("name", ""), response, provider="google")
+
+
+@api.post("/auth/firebase")
+async def auth_firebase(body: dict, response: Response):
+    if not FIREBASE_PROJECT_ID:
+        raise HTTPException(status_code=400, detail="Phone OTP login is not configured")
+    id_tok = body.get("id_token")
+    try:
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+        info = google_id_token.verify_firebase_token(id_tok, google_requests.Request(), FIREBASE_PROJECT_ID)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid OTP token")
+    phone = info.get("phone_number", "")
+    return await _issue_for_user(info.get("email", ""), info.get("name", ""), response, phone=phone, provider="phone")
 
 
 @api.get("/auth/me")
@@ -677,6 +761,47 @@ async def delete_review(rid: str, admin: dict = Depends(require_admin)):
     return {"ok": True}
 
 
+# ------------------------------------------------------------------ recipes
+@api.get("/recipes")
+async def list_recipes(featured: Optional[bool] = None):
+    query = {"featured": True} if featured else {}
+    docs = await db.recipes.find(query).sort("order", 1).to_list(100)
+    return [clean(d) for d in docs]
+
+
+@api.get("/recipes/{slug}")
+async def get_recipe(slug: str):
+    doc = await db.recipes.find_one({"slug": slug})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return clean(doc)
+
+
+@api.post("/recipes")
+async def create_recipe(body: RecipeIn, admin: dict = Depends(require_admin)):
+    doc = body.model_dump()
+    doc["slug"] = doc.get("slug") or slugify(doc["title"])
+    if await db.recipes.find_one({"slug": doc["slug"]}):
+        doc["slug"] = f"{doc['slug']}-{uuid.uuid4().hex[:5]}"
+    doc["created_at"] = now_iso()
+    res = await db.recipes.insert_one(doc)
+    return clean(await db.recipes.find_one({"_id": res.inserted_id}))
+
+
+@api.put("/recipes/{rid}")
+async def update_recipe(rid: str, body: RecipeIn, admin: dict = Depends(require_admin)):
+    doc = body.model_dump()
+    doc["slug"] = doc.get("slug") or slugify(doc["title"])
+    await db.recipes.update_one({"_id": ObjectId(rid)}, {"$set": doc})
+    return clean(await db.recipes.find_one({"_id": ObjectId(rid)}))
+
+
+@api.delete("/recipes/{rid}")
+async def delete_recipe(rid: str, admin: dict = Depends(require_admin)):
+    await db.recipes.delete_one({"_id": ObjectId(rid)})
+    return {"ok": True}
+
+
 # ------------------------------------------------------------------ settings
 @api.get("/settings")
 async def get_settings():
@@ -969,6 +1094,42 @@ async def seed():
         await db.reviews.insert_many([
             {"name": n, "rating": r, "text": t, "product_id": None, "verified": True,
              "active": True, "created_at": now_iso()} for n, r, t in rv])
+
+    # recipes
+    if await db.recipes.count_documents({}) == 0:
+        rb = "https://static.prod-images.emergentagent.com/jobs/db2212d3-eb5d-4aac-b4dc-f2966de0720e/images/{}.jpeg"
+        recs = [
+            dict(title="Spicy Nethili Shutki Bhuna", subtitle="A fiery dry-fish bhuna with anchovies and onion masala.",
+                 img="bb8de3f4be1b7891478f9541be6f745f10bcd78fa67e12c37880107f14cbccbb", time="35 min", serves="4", difficulty="Medium", fish="Nethili Shutki",
+                 ing=["150g Nethili Shutki (cleaned)", "3 onions, sliced", "2 tomatoes", "1 tbsp ginger-garlic paste", "2 tsp red chilli powder", "1 tsp turmeric", "Mustard oil", "Green chillies & coriander"],
+                 steps=["Rinse the shutki in warm water and drain.", "Dry-roast lightly, then set aside.", "Heat mustard oil, fry onions till golden.", "Add ginger-garlic, tomatoes and spices; cook to a thick masala.", "Add shutki, toss and simmer 10 minutes.", "Finish with green chillies and coriander. Serve with rice."]),
+            dict(title="Dried Prawn Coconut Curry", subtitle="Creamy coconut gravy with concentrated prawn flavour.",
+                 img="ad543c8602bd7d7199ec8f9f9862cae9d340be5ddaa7b1503a83f5fb81a4ca6c", time="40 min", serves="4", difficulty="Medium", fish="Dried Prawns",
+                 ing=["100g dried prawns", "1 cup coconut milk", "2 onions", "Curry leaves", "1 tsp mustard seeds", "Turmeric & chilli", "Coconut oil"],
+                 steps=["Soak dried prawns 10 minutes; drain.", "Temper mustard seeds and curry leaves in coconut oil.", "Saute onions, add spices.", "Add prawns and a little water; cook 8 minutes.", "Pour coconut milk and simmer gently.", "Serve hot with steamed rice."]),
+            dict(title="Shutki Bhorta", subtitle="Smoky mashed dry-fish chutney with mustard oil.",
+                 img="70b773d96359b63d3ee52ac7606c38a208b8247a8b9502b6c95c2d4dd56dbf75", time="20 min", serves="3", difficulty="Easy", fish="Any Shutki",
+                 ing=["80g shutki", "2 onions, chopped", "4 dried red chillies", "3 cloves garlic", "2 tbsp mustard oil", "Salt to taste"],
+                 steps=["Dry-roast shutki and chillies until fragrant.", "Pound with garlic and salt.", "Mix in chopped onions.", "Finish with raw mustard oil.", "Serve with hot rice."]),
+            dict(title="Crispy Loitta Shutki Fry", subtitle="Golden, crunchy Bombay duck fry.",
+                 img="b3ec347ef4bf7c2e4875c5204d3036cf32231f3348863c1d6cead1d50eac6166", time="25 min", serves="4", difficulty="Easy", fish="Bombay Duck Shutki",
+                 ing=["150g Bombay duck shutki", "1 tsp turmeric", "2 tsp chilli powder", "Rice flour", "Oil for frying", "Salt"],
+                 steps=["Rinse and pat dry the shutki.", "Marinate with turmeric, chilli and salt.", "Dust lightly with rice flour.", "Shallow-fry till crisp and golden.", "Drain and serve with lemon and onions."]),
+            dict(title="Coastal Shutki & Vegetable Stew", subtitle="Hearty village-style stew with brinjal and drumstick.",
+                 img="f738fb0e09e5032dbc48e4e45750c56ea17263587f781e14abbac8e21c58025a", time="45 min", serves="5", difficulty="Medium", fish="Mixed Shutki",
+                 ing=["120g mixed shutki", "1 brinjal, cubed", "2 drumsticks", "2 potatoes", "Onion, garlic, ginger", "Turmeric & chilli", "Mustard oil"],
+                 steps=["Soak and clean the shutki.", "Saute aromatics in mustard oil.", "Add vegetables and spices.", "Add shutki and water; simmer till tender.", "Adjust seasoning and serve with rice."]),
+            dict(title="Homemade Shutki Pickle (Achar)", subtitle="Tangy, spicy dry-fish pickle that lasts for weeks.",
+                 img="7242aa7d4acc07015a024b17b425e178594858775f04898fdadbdf39a72637d5", time="50 min", serves="Makes 1 jar", difficulty="Advanced", fish="Any Shutki",
+                 ing=["200g shutki", "6 dried red chillies", "1 bulb garlic", "2 tbsp vinegar", "1 tsp mustard seeds", "Mustard oil", "Salt"],
+                 steps=["Fry the shutki until crisp; set aside.", "Make a paste of chilli, garlic and mustard.", "Cook the paste in mustard oil.", "Add shutki and vinegar; cook till oil separates.", "Cool completely and store in a sterilised jar."]),
+        ]
+        await db.recipes.insert_many([
+            {"title": r["title"], "slug": slugify(r["title"]), "subtitle": r["subtitle"],
+             "image": rb.format(r["img"]), "time": r["time"], "serves": r["serves"],
+             "difficulty": r["difficulty"], "fish_used": r["fish"], "ingredients": r["ing"],
+             "steps": r["steps"], "featured": True, "order": i, "created_at": now_iso()}
+            for i, r in enumerate(recs)])
 
     # coupon
     if not await db.coupons.find_one({"code": "FIRST10"}):

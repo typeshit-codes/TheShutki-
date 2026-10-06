@@ -13,6 +13,7 @@ export function StoreProvider({ children }) {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [settings, setSettings] = useState({});
+  const [authConfig, setAuthConfig] = useState({ google_enabled: false, firebase_enabled: false });
   const [cart, setCart] = useState(() => read("ts_cart", []));
   const [wishlist, setWishlist] = useState(() => read("ts_wishlist", []));
 
@@ -21,6 +22,7 @@ export function StoreProvider({ children }) {
 
   useEffect(() => {
     api.get("/settings").then((r) => setSettings(r.data || {})).catch(() => {});
+    api.get("/auth/config").then((r) => setAuthConfig(r.data || {})).catch(() => {});
     const token = localStorage.getItem("ts_token");
     if (token) {
       api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {
@@ -47,6 +49,19 @@ export function StoreProvider({ children }) {
     localStorage.removeItem("ts_token");
     setUser(null);
     api.post("/auth/logout").catch(() => {});
+  };
+
+  const loginWithGoogle = async (credential) => {
+    const { data } = await api.post("/auth/google", { credential });
+    localStorage.setItem("ts_token", data.token);
+    setUser(data);
+    return data;
+  };
+  const loginWithFirebase = async (id_token) => {
+    const { data } = await api.post("/auth/firebase", { id_token });
+    localStorage.setItem("ts_token", data.token);
+    setUser(data);
+    return data;
   };
 
   const refreshSettings = useCallback(() => {
@@ -98,7 +113,7 @@ export function StoreProvider({ children }) {
   const inWishlist = (id) => wishlist.some((p) => p.id === id);
 
   const value = {
-    user, authReady, login, register, logout,
+    user, authReady, login, register, logout, loginWithGoogle, loginWithFirebase, authConfig,
     settings, refreshSettings, setSettings,
     cart, addToCart, updateQty, removeFromCart, clearCart, cartCount, cartSubtotal,
     wishlist, toggleWishlist, inWishlist, formatApiError,

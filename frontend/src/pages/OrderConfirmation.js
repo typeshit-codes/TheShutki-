@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useLocation, Link } from "react-router-dom";
 import { CheckCircle2, Package } from "lucide-react";
 import api, { inr } from "@/lib/api";
+import OrderTimeline from "@/components/OrderTimeline";
 
 export default function OrderConfirmation() {
   const { orderId } = useParams();
@@ -26,6 +27,13 @@ export default function OrderConfirmation() {
           <p className="text-sm text-charcoal/60 mb-4">Amount: <span className="font-bold text-ocean">{inr(payment.total)}</span></p>
           <img src={payment.qr} alt="UPI QR" className="w-56 h-56 mx-auto" data-testid="upi-qr" />
           <p className="text-xs text-charcoal/50 mt-3 break-all max-w-xs mx-auto">Or pay to UPI link in your app</p>
+        </div>
+      )}
+
+      {order && (
+        <div className="mt-8 bg-white rounded-2xl shadow-soft p-6 text-left">
+          <h2 className="font-playfair text-lg font-bold text-ocean mb-4">Order Status</h2>
+          <OrderTimeline status={order.status} />
         </div>
       )}
 

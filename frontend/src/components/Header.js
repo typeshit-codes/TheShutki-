@@ -9,6 +9,7 @@ const NAV = [
   { label: "Shop", to: "/shop" },
   { label: "Dry Fish", to: "/shop?category=Dry Fish" },
   { label: "Combos", to: "/shop?combo=1" },
+  { label: "Recipes", to: "/recipes" },
   { label: "Ready to Cook", to: "/shop?category=Ready to Cook" },
   { label: "Pickles", to: "/shop?category=Fish Pickles" },
   { label: "About Us", to: "/about" },
