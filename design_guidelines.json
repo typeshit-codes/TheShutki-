@@ -1,0 +1,167 @@
+{
+  "project_name": "TheShutki.com",
+  "app_type": "e-commerce",
+  "theme_strategy": "light",
+  "typography": {
+    "heading_font": "Playfair Display",
+    "body_font": "Outfit",
+    "hierarchy": {
+      "h1": "text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-charcoal",
+      "h2": "text-3xl md:text-4xl font-semibold tracking-tight text-charcoal",
+      "h3": "text-xl md:text-2xl font-medium text-ocean-blue",
+      "body": "text-base md:text-lg leading-relaxed text-charcoal/80",
+      "labels": "text-xs md:text-sm uppercase tracking-[0.15em] font-semibold text-ocean-blue/70"
+    },
+    "instructions": "Use Playfair Display for all headings (H1-H4) to evoke premium, traditional authenticity. Use Outfit for body, buttons, UI elements (price, weights) for crisp modern app-like legibility. Do NOT use Inter or standard sans fonts."
+  },
+  "colors": {
+    "primary_brand": {
+      "DEFAULT": "#1A3A5C",
+      "light": "#2A5280",
+      "dark": "#0F2236",
+      "description": "Deep ocean blue. Use for primary text in badges, dark footer backgrounds, header announcement bar, and active states."
+    },
+    "accent": {
+      "DEFAULT": "#D96E3E",
+      "hover": "#C25D30",
+      "light": "#FDF0EA",
+      "description": "Warm earthy sunset orange. Use for primary CTAs ('Buy Now', 'Add to Cart'), notification dots, discount badges, and selective hover states."
+    },
+    "background": {
+      "base": "#F9F8F6",
+      "surface": "#FFFFFF",
+      "sand": "#EFECE5",
+      "description": "Base is Off-white/Cream for natural authenticity. Surface is Pure White for high-contrast product cards. Sand for secondary sections (Trust cards, combos)."
+    },
+    "text": {
+      "primary": "#1C2434",
+      "secondary": "#4A5568",
+      "muted": "#718096"
+    }
+  },
+  "visual_enhancers": {
+    "shadows": {
+      "soft": "shadow-[0_4px_20px_rgb(0,0,0,0.03)]",
+      "elevated": "shadow-[0_12px_40px_rgb(0,0,0,0.08)]",
+      "header": "shadow-[0_4px_30px_rgb(26,58,92,0.05)]"
+    },
+    "radii": {
+      "product_card": "rounded-2xl",
+      "button": "rounded-full",
+      "badges": "rounded-md",
+      "images": "rounded-xl"
+    },
+    "surfaces": {
+      "glass": "backdrop-blur-xl bg-[#F9F8F6]/85 border-b border-[#1A3A5C]/5"
+    }
+  },
+  "components": {
+    "header": {
+      "announcement_bar": "bg-[#1A3A5C] text-[#F9F8F6] text-sm py-2 text-center font-outfit",
+      "main_nav": "Sticky at top with z-50. Surface must be Glassmorphism (NO fully transparent headers). Must include Brand Logo, Desktop Links, Search, User, Cart.",
+      "mobile_bottom_nav": "fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-sand pb-safe pt-2 flex justify-around shadow-[0_-10px_20px_rgb(0,0,0,0.03)]. Icons: Home, Shop, Search, Wishlist, Cart."
+    },
+    "product_card": {
+      "structure": "Surface: white, shadow-soft, rounded-2xl overflow-hidden group hover:shadow-elevated transition-all duration-300.",
+      "image": "aspect-square object-cover w-full group-hover:scale-105 transition-transform duration-500",
+      "content_padding": "p-4 md:p-5",
+      "title": "font-playfair text-lg font-semibold truncate",
+      "price": "font-outfit text-lg font-bold text-[#1A3A5C]",
+      "weight_selector": "flex gap-2 mt-3 text-sm font-outfit border border-sand rounded-lg p-1",
+      "ctas": "w-full mt-4 bg-[#F9F8F6] text-[#1A3A5C] hover:bg-[#D96E3E] hover:text-white rounded-full py-2.5 font-medium transition-colors"
+    },
+    "trust_cards": {
+      "style": "bg-[#EFECE5] rounded-2xl p-6 flex flex-col items-center text-center gap-3",
+      "icon": "text-[#D96E3E] w-8 h-8"
+    },
+    "hero_section": {
+      "overlay": "bg-gradient-to-r from-[#1A3A5C]/90 via-[#1A3A5C]/50 to-transparent",
+      "content": "Left-aligned, high emotional impact. H1 font-playfair, large whitespace. Avoid centering."
+    }
+  },
+  "layouts_and_grids": {
+    "general": "Generous spacing. Use py-20 to py-32 for sections. Container max-width: 1440px.",
+    "product_grid": "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6 lg:gap-8",
+    "bento_combos": "grid grid-cols-1 md:grid-cols-12 gap-6. Hero combo spans col-span-12 md:col-span-8, secondary spans col-span-12 md:col-span-4."
+  },
+  "motion": {
+    "scrolling": "Implement smooth scrolling (Lenis) for premium feel.",
+    "hover_states": "Buttons use transform translateY(-2px). Images scale 105%.",
+    "page_load": "Fade up text layers using Framer Motion with stagger."
+  },
+  "accessibility": {
+    "contrast": "Ensure all text on cream/sand background meets APCA contrast guidelines.",
+    "focus": "focus-visible:ring-2 focus-visible:ring-[#D96E3E] focus-visible:ring-offset-2 focus-visible:outline-none",
+    "testing": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case, role-based."
+  },
+  "media_and_icons": {
+    "icon_library": "@phosphor-icons/react (Duotone weight for premium feel)",
+    "images_rule": "Large, high-quality, border-radius applied to avoid sharp blocks unless full screen. Max-height 80vh on mobile to prevent blocking scroll."
+  },
+  "image_urls": [
+    {
+      "url": "https://images.unsplash.com/photo-1647962431451-d0fdaf1cf21c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwxfHxjb2FzdGFsJTIwc3Vuc2V0JTIwb2NlYW58ZW58MHx8fHwxNzkxMjcxNDIxfDA&ixlib=rb-4.1.0&q=85",
+      "category": "Hero Background",
+      "description": "Sunset over ocean beach, perfect for hero section conveying coastal origins."
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1599655345131-6eb73b81d8d6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzV8MHwxfHNlYXJjaHwzfHxpbmRpYW4lMjBzZWFmb29kJTIwZGlzaHxlbnwwfHx8fDE3OTEyNzE0MjF8MA&ixlib=rb-4.1.0&q=85",
+      "category": "Featured Product / Combos",
+      "description": "Cooked shrimps on a blue ceramic plate. Perfect for showcasing the cooked end-result in 'Combo' or 'Best Seller' thumbnails."
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1574484284002-952d92456975?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzV8MHwxfHNlYXJjaHwxfHxpbmRpYW4lMjBzZWFmb29kJTIwZGlzaHxlbnwwfHx8fDE3OTEyNzE0MjF8MA&ixlib=rb-4.1.0&q=85",
+      "category": "Recipe/How it Works",
+      "description": "Rich orange sauce salmon, shows premium cooked output."
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1578428153977-6b309954a1e2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwxfHxkcmllZCUyMGZpc2glMjBmb29kJTIwcGhvdG9ncmFwaHl8ZW58MHx8fHwxNzkxMjcxNDIxfDA&ixlib=rb-4.1.0&q=85",
+      "category": "Category Banner / Story",
+      "description": "Dried fish stack. Good for authentic coastal sourcing background or category headers."
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1783615317256-6a8bc8adb2a2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwzfHxkcmllZCUyMGZpc2glMjBmb29kJTIwcGhvdG9ncmFwaHl8ZW58MHx8fHwxNzkxMjcxNDIxfDA&ixlib=rb-4.1.0&q=85",
+      "category": "Brand Story",
+      "description": "Inside traditional stall. Use for 'Authentic shutki' or 'Sourcing' section."
+    }
+  ],
+  "instructions_to_main_agent": {
+    "stack": "React.js (use .js files, NOT .tsx), Tailwind CSS, Shadcn UI, Framer Motion.",
+    "implementation_steps": [
+      "1. Install necessary dependencies: @phosphor-icons/react, framer-motion, @studio-freight/react-lenis, sonner",
+      "2. Configure tailwind.config.js with provided color hexes, custom fonts (Playfair Display, Outfit).",
+      "3. Build Custom Product Card Component matching exact design specs (no standard Shadcn card for products).",
+      "4. Implement Sticky Header with Glassmorphism and Mobile Bottom Nav (z-50).",
+      "5. Implement Floating WhatsApp button above bottom nav on mobile.",
+      "6. Build Homepage layout incorporating Hero, Category Scroll, Budget Grid, Bestsellers Carousel, Combos, Trust sections.",
+      "7. Scaffold PDP (Product Detail Page) with tabs and pin code checker.",
+      "8. All CTAs and interactive items must include data-testid."
+    ],
+    "shadcn_usage": "Use Shadcn strictly for complex interactive elements (Select, Accordion, Tabs for PDP, Carousel, Dialog for quick view). Do NOT use Shadcn Card for product displays, build raw HTML/Tailwind for artful control.",
+    "strict_rules": [
+      "DO NOT add .App { text-align: center; } in any CSS.",
+      "NEVER use generic fonts for Headings. Use Playfair Display.",
+      "NEVER use pure transparent backgrounds on sticky headers or dropdowns. Use the specified Glassmorphism utility.",
+      "Include data-testid on EVERYTHING interactive."
+    ]
+  },
+  "universal_guidelines_for_main_agent": [
+    "You tend to converge toward generic, 'on distribution' outputs. In frontend design, this creates what users call the 'AI slop' aesthetic. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms.",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file. This disrupts the human natural reading flow of text.",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style.",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories (especially sponsor logos) = main agent will use placeholder text which is FORBIDDEN.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Create new components that match the style and conventions of existing components when needed.",
+    "Examine existing components to understand the project's component patterns before creating new ones.",
+    "Use sonner for toasts, located in /app/src/components/ui/sonner.tsx."
+  ]
+}
