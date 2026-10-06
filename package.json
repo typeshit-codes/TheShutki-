@@ -2,13 +2,15 @@
   "name": "theshutki",
   "version": "1.0.0",
   "private": true,
-  "description": "TheShutki.com API for Hostinger hPanel (Express)",
+  "description": "TheShutki.com shop and API for Hostinger hPanel. The site is served at / and the API at /api.",
   "main": "server.js",
   "scripts": {
+    "build": "node scripts/build-frontend.js",
+    "postinstall": "node scripts/build-frontend.js",
     "start": "node server.js"
   },
   "engines": {
-    "node": "22.x"
+    "node": ">=22"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

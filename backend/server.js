@@ -572,11 +572,25 @@ api.get("/sitemap.xml", async (req, res) => {
 
 api.get("/", (req, res) => res.json({ message: "TheShutki API running", db: true }));
 
-app.get(["/", "/health"], (req, res) => {
+app.use("/api", api);
+
+app.get("/health", (req, res) => {
   res.json({ ok: true, service: "theshutki-api", db: !!db });
 });
 
-app.use("/api", api);
+// Same Hostinger app serves the shop. /api stays the API.
+const FRONTEND_BUILD = path.join(__dirname, "..", "frontend", "build");
+const FRONTEND_INDEX = path.join(FRONTEND_BUILD, "index.html");
+if (fs.existsSync(FRONTEND_INDEX)) {
+  app.use(express.static(FRONTEND_BUILD));
+  app.use((req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+    if (req.path.startsWith("/api") || req.path === "/health") return next();
+    res.sendFile(FRONTEND_INDEX);
+  });
+} else {
+  app.get("/", (req, res) => res.json({ ok: true, service: "theshutki-api", db: !!db, frontend: false }));
+}
 
 function listen() {
   // Older hPanel Node apps are started by Passenger and ignore a hardcoded port.

@@ -39,7 +39,7 @@ export default function AdminProducts() {
     fd.append("file", file);
     try {
       const { data } = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      const url = process.env.REACT_APP_BACKEND_URL + data.url;
+      const url = (process.env.REACT_APP_BACKEND_URL || "") + data.url;
       setForm((f) => ({ ...f, images: [...f.images, url] }));
       toast.success("Image uploaded");
     } catch (err) { toast.error("Upload failed"); } finally { setUploading(false); }
