@@ -41,7 +41,7 @@ export default function Header() {
           </button>
 
           <Link to="/" className="flex items-center shrink-0" data-testid="logo-link">
-            <img src="/logo.png" alt="TheShutki" className="h-10 md:h-14 w-auto" />
+            <img src="/logo.png" alt="TheShutki" className="h-9 md:h-12 w-auto" />
           </Link>
 
           <nav className="hidden lg:flex items-center gap-7 flex-1 justify-center">

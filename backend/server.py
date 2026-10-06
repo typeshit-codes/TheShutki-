@@ -538,6 +538,18 @@ def gen_order_id() -> str:
 @api.post("/orders")
 async def create_order(body: OrderIn, request: Request):
     settings = await db.settings.find_one({"key": "main"}) or {}
+
+    # recompute each line price from DB to prevent client-side price tampering
+    for it in body.items:
+        try:
+            prod = await db.products.find_one({"_id": ObjectId(it.product_id)})
+        except Exception:
+            prod = None
+        if prod:
+            match = next((v for v in prod.get("variants", []) if v["weight"] == it.weight), None)
+            if match:
+                it.price = float(match["price"])
+
     subtotal = round(sum(i.price * i.quantity for i in body.items), 2)
     if subtotal <= 0:
         raise HTTPException(status_code=400, detail="Cart is empty")
@@ -747,7 +759,6 @@ async def upload(file: UploadFile = File(...), admin: dict = Depends(require_adm
     await db.files.insert_one({"id": str(uuid.uuid4()), "storage_path": result["path"],
                                "original_filename": file.filename, "content_type": ctype,
                                "is_deleted": False, "created_at": now_iso()})
-    backend = os.environ.get("REACT_APP_BACKEND_URL", "")
     return {"url": f"/api/files/{result['path']}", "path": result["path"]}
 
 

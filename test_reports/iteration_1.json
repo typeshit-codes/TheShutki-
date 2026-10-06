@@ -1,0 +1,48 @@
+{
+  "summary": "First-run full-stack testing for TheShutki.com. Ran 36 pytest backend API tests (100% pass) covering auth, products, categories, coupons, orders (COD+UPI+QR), reviews, settings, admin analytics/inventory/customers/CRUD. Executed Playwright end-to-end: Home -> Search(Nethili) -> Product -> Variant 500g -> Add to Cart -> Pincode check -> Cart -> Apply FIRST10 (total correctly discounted) -> Checkout (COD) -> Order placed (TS2610065F275, redirected to /order-confirmation). Admin login works at /account; /admin dashboard renders analytics (Revenue, Orders, AOV, Customers, Sales chart, Bestsellers, Inventory alerts); admin-nav-products works and add-product-btn present. All critical flows PASS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "CORS middleware", "issue": "server.py has allow_origins=['*'] combined with allow_credentials=True. Browsers reject credentialed requests under wildcard origin. Bearer-token flow still works, but httpOnly cookie fallback will fail cross-origin. Set explicit origins or disable allow_credentials."},
+      {"endpoint": "POST /api/orders", "issue": "Server does NOT recompute item prices from DB — trusts client-sent 'price' per line item. A malicious client can set price=0 and place a free order. Validate against product.variants.price server-side."},
+      {"endpoint": "POST /api/orders", "issue": "No auth required to place order; also decrements stock before payment confirmation (even for UPI). Consider requiring auth and only decrementing on payment success."},
+      {"endpoint": "GET /api/orders/{order_id}", "issue": "Public — anyone with an order_id can fetch full customer address/phone. Should require owner or admin."},
+      {"endpoint": "POST /api/upload", "issue": "References undefined 'backend' variable in local scope but doesn't use it (dead code); also no file-size/type validation."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin /account login", "issues": ["After admin login the page stays on /account (toast only); user has to manually navigate to /admin. Consider auto-redirect to /admin for role=admin."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix CORS: set explicit origins when allow_credentials=True (don't use '*').",
+    "Harden POST /api/orders: validate item prices against DB; require auth for order creation; only decrement stock on paid.",
+    "Protect GET /api/orders/{order_id} with owner/admin check.",
+    "(UX) Auto-redirect admin users to /admin after login from /account."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 998 lines in a single file — split into routers/models/services for maintainability.",
+    "Order totals are recomputed server-side for subtotal and shipping but item prices are trusted from client input — price tampering vulnerability.",
+    "CORS allow_credentials=True with allow_origins=['*'] is spec-invalid; browsers will block credentialed cross-origin requests.",
+    "Stock decrement happens before payment confirmation (even for UPI orders where no gateway capture occurs) — risk of stock drain by abandoned orders.",
+    "GET /api/orders/{order_id} is unauthenticated and leaks PII (name/phone/address).",
+    "Minor: /api/upload has unused 'backend' env lookup and no size/MIME validation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (new)"
+  ],
+  "success_rate": {"backend": "100% (36/36)", "frontend": "100% of critical flows (search, PDP, cart, coupon, COD checkout, admin dashboard)"},
+  "test_credentials": "admin@theshutki.com / Shutki@2026 ; customer@test.com / Test@1234 ; Coupon FIRST10 (10% max 300)",
+  "seed_data_creation": "None added — tests use seeded admin/customer/coupon and clean up (products/coupons/reviews) after creation.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest at /app/backend/tests/backend_test.py (uses REACT_APP_BACKEND_URL + /api). All data-testids are discoverable in Header.js, Cart.js, Checkout.js, ProductDetail.js, Shop.js. UPI order QR verified in backend test test_place_upi_order_returns_qr. Order placement does NOT require auth. Admin redirect: after login at /account it stays on /account; navigate to /admin manually.",
+  "rca of the issue": "N/A — no blocking issues. Only hardening recommendations (security-of-order endpoint, price tampering, CORS)."
+}

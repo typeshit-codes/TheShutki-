@@ -23,9 +23,9 @@ export default function Account() {
     e.preventDefault();
     setLoading(true);
     try {
-      if (mode === "login") await login(form.email, form.password);
-      else await register(form);
+      const u = mode === "login" ? await login(form.email, form.password) : await register(form);
       toast.success("Welcome to TheShutki!");
+      if (u?.role === "admin") navigate("/admin");
     } catch (err) {
       toast.error(formatApiError(err.response?.data?.detail));
     } finally { setLoading(false); }
