@@ -1,4 +1,6 @@
 const path = require("path");
+// hPanel writes panel variables into the repo-root .env. Local secrets live in backend/.env.
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 const fs = require("fs");
 const crypto = require("crypto");
@@ -12,10 +14,16 @@ const { MongoClient, ObjectId } = require("mongodb");
 const { slugify, nowIso, hashPassword, verifyPassword, signToken, clean, JWT_SECRET } = require("./util");
 const { seed } = require("./seed");
 
-const MONGO_URL = process.env.MONGO_URL || "mongodb://localhost:27017";
-const DB_NAME = process.env.DB_NAME || "theshutki";
+function envValue(name) {
+  const value = (process.env[name] || "").trim().replace(/^["']|["']$/g, "");
+  return value;
+}
+const MONGO_URL = envValue("MONGO_URL") || envValue("MONGODB_URI") || "mongodb://localhost:27017";
+const DB_NAME = envValue("DB_NAME") || "theshutki";
+const MONGO_CONFIGURED = Boolean(envValue("MONGO_URL") || envValue("MONGODB_URI"));
 
 let db;
+let dbError = MONGO_CONFIGURED ? "connecting" : "MONGO_URL is not set";
 
 const app = express();
 // hPanel terminates TLS in front of Node.
@@ -44,8 +52,14 @@ function persistUpload(file) {
 }
 
 const api = express.Router();
+function databaseDetail() {
+  if (!MONGO_CONFIGURED) {
+    return "MONGO_URL is not set. In hPanel → Environment variables, add MONGO_URL with the Atlas connection string, then restart.";
+  }
+  return `Database is not connected (${dbError}). In Atlas → Network Access, allow 0.0.0.0/0.`;
+}
 api.use((req, res, next) => {
-  if (!db) return res.status(503).json({ detail: "Database is connecting. In hPanel set MONGO_URL to a MongoDB Atlas connection string." });
+  if (!db) return res.status(503).json({ detail: databaseDetail() });
   next();
 });
 
@@ -575,7 +589,7 @@ api.get("/", (req, res) => res.json({ message: "TheShutki API running", db: true
 app.use("/api", api);
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true, service: "theshutki-api", db: !!db });
+  res.json({ ok: !!db, service: "theshutki-api", db: !!db, mongoConfigured: MONGO_CONFIGURED, error: db ? undefined : dbError });
 });
 
 // Same Hostinger app serves the shop. /api stays the API.
@@ -615,9 +629,11 @@ async function connectMongo() {
       const database = client.db(DB_NAME);
       await seed(database);
       db = database;
+      dbError = "";
       console.log(`MongoDB connected (${DB_NAME})`);
       return;
     } catch (err) {
+      dbError = String(err.message || "connect failed").replace(/mongodb(\+srv)?:\/\/\S+/gi, "mongodb://***");
       try { await client.close(); } catch {}
       const wait = Math.min(30000, 2000 * attempt);
       console.error(`MongoDB connect failed (attempt ${attempt}): ${err.message}`);
